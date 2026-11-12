@@ -18,7 +18,7 @@
         <div class="bar"><div class="fill" style="transform:scaleX({updater.progress})"></div></div>
         <span class="small">{updater.status === "installing" ? "Instalez și repornesc aplicația…" : `Descarc… ${Math.round(updater.progress * 100)}%`}</span>
       {:else}
-        <span class="small">{updater.notes ? updater.notes.split("\n")[0] : "Datele și calibrarea tale rămân neschimbate."}</span>
+        <span class="small">{updater.waitingForGame ? "Se instalează singură când închizi Fortnite. Sau acum, cu un clic." : updater.notes ? updater.notes.split("\n")[0] : "Datele și calibrarea tale rămân neschimbate."}</span>
       {/if}
     </div>
     {#if !busy}

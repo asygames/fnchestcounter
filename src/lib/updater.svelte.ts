@@ -2,6 +2,7 @@
 // descarcă, instalează și repornește aplicația. Datele rămân în %APPDATA%.
 
 import { isTauri } from "./api";
+import { app } from "./state.svelte";
 import type { Update } from "@tauri-apps/plugin-updater";
 
 type Status = "idle" | "checking" | "none" | "available" | "downloading" | "installing" | "error";
@@ -13,13 +14,17 @@ class Updater {
   progress = $state(0);
   error = $state("");
   dismissed = $state(false);
+  /** Actualizarea automată așteaptă să închizi Fortnite. */
+  waitingForGame = $state(false);
   private update: Update | null = null;
   private timer: ReturnType<typeof setInterval> | undefined;
 
   start() {
     if (!isTauri || this.timer) return;
     setTimeout(() => this.check(true), 4000);
-    this.timer = setInterval(() => this.check(true), 6 * 3600 * 1000);
+    this.timer = setInterval(() => this.check(true), 2 * 3600 * 1000);
+    // Cât timp o actualizare automată așteaptă, verificăm la un minut dacă ai închis jocul.
+    setInterval(() => this.maybeAuto(), 60_000);
   }
 
   async check(silent = false) {
@@ -39,6 +44,7 @@ class Updater {
         this.notes = (u.body ?? "").trim();
         this.status = "available";
         this.dismissed = false;
+        this.maybeAuto();
       } else {
         this.status = "none";
       }
@@ -47,6 +53,26 @@ class Updater {
       this.status = silent ? "idle" : "error";
       this.error = String(e);
     }
+  }
+
+  /** Fortnite e deschis și îl capturăm (în modul „monitor” nu știm, deci nu așteptăm). */
+  private inGame() {
+    const s = app.snap?.settings;
+    return app.live?.capture === "capturing" && s?.capture_source === "window";
+  }
+
+  /** Dacă „Actualizare automată” e pornită, instalează acum sau după ce închizi jocul. */
+  maybeAuto() {
+    if (this.status !== "available" || !app.snap?.settings.auto_update) {
+      this.waitingForGame = false;
+      return;
+    }
+    if (this.inGame()) {
+      this.waitingForGame = true;
+      return;
+    }
+    this.waitingForGame = false;
+    void this.install();
   }
 
   async install() {

@@ -10,6 +10,9 @@ use std::path::{Path, PathBuf};
 
 const MAX_EVENTS: usize = 2000;
 const MAX_SESSIONS: usize = 200;
+/// O repornire a aplicației (de ex. după o actualizare) continuă sesiunea
+/// dacă ultimul cufăr a fost numărat acum mai puțin de atât.
+const RESUME_SESSION_MS: i64 = 15 * 60_000;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChestEvent {
@@ -72,6 +75,8 @@ pub struct Settings {
     /// Tasta care pornește/oprește mutarea overlay-ului (merge și din joc).
     pub hotkey_overlay_move: String,
     pub reduce_motion: bool,
+    /// Instalează singur actualizările (când Fortnite nu e deschis).
+    pub auto_update: bool,
     /// Cum găsim promptul: automat (OCR, fără calibrare) sau cu șablonul din probe.
     pub visual_method: VisualMethod,
     /// Numără doar cuferele (aurii), nu și lăzile de muniție (au tot „SEARCH”).
@@ -127,6 +132,7 @@ impl Default for Settings {
             hotkey_audio_sample: "F7".into(),
             hotkey_overlay_move: "F6".into(),
             reduce_motion: false,
+            auto_update: true,
             visual_method: VisualMethod::Auto,
             chest_only: true,
             search_words: "SEARCH".into(),
@@ -192,7 +198,11 @@ impl Store {
         let settings: Settings = read_json(&dir.join("settings.json"));
         let calib: Calibration = read_json(&dir.join("calibration.json"));
         let now = now_ms();
-        let session = Session { id: now, start: now, end: now, count: 0 };
+        let session = match data.sessions.back() {
+            // Repornire rapidă (actualizare, închis/deschis): continuăm aceeași sesiune.
+            Some(last) if (0..RESUME_SESSION_MS).contains(&(now - last.end)) => last.clone(),
+            _ => Session { id: now, start: now, end: now, count: 0 },
+        };
         Self { dir, data, settings, calib, session }
     }
 
@@ -310,8 +320,32 @@ mod tests {
         assert_eq!(s.data.events.len(), 3);
         assert_eq!(s.data.sessions.len(), 1);
         assert_eq!(s.settings.fps, 20);
-        assert_eq!(s.session.count, 0, "sesiune nouă la pornire");
+        assert_eq!(s.session.count, 1, "repornire rapidă: sesiunea continuă");
         assert_eq!(s.days_from_events(), s.data.days);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn resumes_session_only_after_a_quick_restart() {
+        let dir = tmpdir("resume");
+        {
+            let mut s = Store::open(dir.clone());
+            assert!(s.add(1, Source::Visual));
+            assert!(s.add(1, Source::Visual));
+        }
+        {
+            // Repornire imediată: aceeași sesiune, iar cufărul următor se adaugă la ea.
+            let mut s = Store::open(dir.clone());
+            assert_eq!(s.session.count, 2);
+            assert!(s.add(1, Source::Visual));
+            assert_eq!(s.data.sessions.len(), 1);
+            assert_eq!(s.data.sessions.back().unwrap().count, 3);
+            // Ultimul cufăr „acum o oră”.
+            s.data.sessions.back_mut().unwrap().end -= 60 * 60_000;
+            s.save_data();
+        }
+        let s = Store::open(dir.clone());
+        assert_eq!(s.session.count, 0, "pauză lungă: sesiune nouă");
         let _ = fs::remove_dir_all(dir);
     }
 

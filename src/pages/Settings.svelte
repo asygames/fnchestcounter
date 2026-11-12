@@ -214,11 +214,14 @@
       <p class="fh">
         {#if updater.status === "checking"}Verific…
         {:else if updater.status === "none"}Ai ultima versiune.
+        {:else if updater.status === "available" && updater.waitingForGame}Versiunea v{updater.version} se instalează singură când închizi Fortnite.
         {:else if updater.status === "available"}Versiunea v{updater.version} e disponibilă.
         {:else if updater.status === "downloading" || updater.status === "installing"}Se instalează v{updater.version}…
         {:else if updater.status === "error"}Nu am putut verifica: {updater.error}
-        {:else}Aplicația verifică singură la pornire și apoi la fiecare 6 ore.{/if}
+        {:else}Aplicația verifică singură la pornire și apoi la fiecare 2 ore.{/if}
       </p>
+      <label class="row"><span>Actualizare automată</span><input type="checkbox" class="tg" checked={s.auto_update} onchange={(e) => { save({ auto_update: e.currentTarget.checked }); if (e.currentTarget.checked) updater.maybeAuto(); }} /></label>
+      <p class="fh">Instalez singur versiunile noi și repornesc aplicația. Dacă joci, aștept până închizi Fortnite. Sesiunea continuă după repornire.</p>
       <div class="btns">
         {#if updater.status === "available"}
           <button class="btn small green" onclick={() => updater.install()}>Actualizează la v{updater.version}</button>
