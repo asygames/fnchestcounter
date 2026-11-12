@@ -33,6 +33,10 @@ export interface Settings {
   hotkey_visual_sample: string;
   hotkey_audio_sample: string;
   reduce_motion: boolean;
+  /** „auto” = citesc promptul SEARCH cu OCR, fără calibrare; „template” = probe într-o zonă fixă. */
+  visual_method: "auto" | "template";
+  chest_only: boolean;
+  search_words: string;
 }
 
 export interface Live {
@@ -49,12 +53,17 @@ export interface Live {
   audio_device: string;
   audio_score: number;
   key_down: boolean;
+  ocr: "off" | "ready" | "missing" | "error";
+  ocr_error: string;
+  prompt_text: string;
+  gold: number;
 }
 
 export interface ChestEvent { ts: number; source: Source; delta: number }
 export interface Session { id: number; start: number; end: number; count: number }
 
 export interface CalibInfo {
+  visual_auto: boolean;
   visual_ready: boolean;
   visual_samples: number;
   visual_score: number;
@@ -183,12 +192,16 @@ const mock = (() => {
       hotkey_visual_sample: "F8",
       hotkey_audio_sample: "F7",
       reduce_motion: false,
+      visual_method: "auto",
+      chest_only: true,
+      search_words: "SEARCH",
     },
-    calib: { visual_ready: true, visual_samples: 4, visual_score: 0.91, visual_threshold: 0.66, audio_ready: false, audio_samples: 0, audio_score: 0 },
+    calib: { visual_auto: true, visual_ready: true, visual_samples: 4, visual_score: 0.91, visual_threshold: 0.66, audio_ready: false, audio_samples: 0, audio_score: 0 },
     live: {
       capture: "capturing", capture_target: "Fortnite", capture_error: "", frame_w: 2560, frame_h: 1440,
       fps: 15, analyze_ms: 0.9, visual_score: 0.12, prompt_visible: false,
       audio: "listening", audio_device: "Căști (Realtek)", audio_score: 0.08, key_down: false,
+      ocr: "ready", ocr_error: "", prompt_text: "", gold: 0,
     },
     supported: true,
     version: "0.1.0-demo",
@@ -201,7 +214,13 @@ const mock = (() => {
     const l = snap.live;
     const phase = t % 40;
     l.prompt_visible = phase > 10 && phase < 22;
-    l.visual_score = l.prompt_visible ? 0.82 + Math.random() * 0.1 : 0.05 + Math.random() * 0.15;
+    if (snap.settings.visual_method === "auto") {
+      l.visual_score = l.prompt_visible ? 1 : 0;
+      l.prompt_text = l.prompt_visible ? "SEARCH" : "";
+      l.gold = l.prompt_visible ? 0.31 + Math.random() * 0.05 : 0;
+    } else {
+      l.visual_score = l.prompt_visible ? 0.82 + Math.random() * 0.1 : 0.05 + Math.random() * 0.15;
+    }
     l.audio_score = phase === 22 || phase === 23 ? 0.88 : Math.random() * 0.2;
     l.key_down = phase > 17 && phase < 22;
     l.fps = 14.6 + Math.random() * 0.6;
@@ -240,6 +259,7 @@ const mock = (() => {
     },
     async updateSettings(s: Settings) {
       snap.settings = structuredClone(s);
+      snap.calib.visual_auto = s.visual_method === "auto";
       emit("settings", s);
       return s;
     },
@@ -257,6 +277,18 @@ const mock = (() => {
     },
     async audioClear() { snap.calib.audio_ready = false; snap.calib.audio_samples = 0; },
     async visualPreview(): Promise<ArrayBuffer> {
+      if (snap.settings.visual_method === "auto") {
+        // Decupajul citit cu OCR: „SEARCH” negru pe alb (bare în locul literelor).
+        const w = 240, h = 90;
+        const buf = new Uint8Array(9 + w * h);
+        const dv = new DataView(buf.buffer);
+        dv.setUint32(0, w, true); dv.setUint32(4, h, true); buf[8] = 0;
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+          const letter = y > 30 && y < 60 && x > 30 && x < 210 && (x - 30) % 30 < 22;
+          buf[9 + y * w + x] = letter ? 20 : 250;
+        }
+        return buf.buffer;
+      }
       const w = 192, h = 85;
       const buf = new Uint8Array(9 + w * h * 3);
       const dv = new DataView(buf.buffer);

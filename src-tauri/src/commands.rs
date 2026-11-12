@@ -15,6 +15,8 @@ type Eng<'a> = State<'a, Arc<Engine>>;
 
 #[derive(Serialize)]
 pub struct CalibInfo {
+    /// Detectorul automat (fără calibrare) e pornit.
+    visual_auto: bool,
     visual_ready: bool,
     visual_samples: usize,
     visual_score: f32,
@@ -45,11 +47,13 @@ pub struct Snapshot {
 fn calib_info(e: &Engine) -> CalibInfo {
     let st = e.store.lock();
     let v = e.visual.read();
+    let auto = v.auto();
     CalibInfo {
-        visual_ready: v.tpl.is_some(),
+        visual_auto: auto,
+        visual_ready: auto || v.tpl.is_some(),
         visual_samples: st.calib.visual_samples.len(),
         visual_score: v.tpl.as_ref().map_or(0.0, |t| t.calib_score),
-        visual_threshold: v.threshold,
+        visual_threshold: if auto { 0.75 } else { v.threshold },
         audio_ready: st.calib.audio.is_some(),
         audio_samples: e.audio_samples.load(Ordering::Relaxed),
         audio_score: st.calib.audio.as_ref().map_or(0.0, |t| t.calib_score),
@@ -124,6 +128,10 @@ pub fn update_settings(app: AppHandle, engine: Eng, settings: Settings) -> Resul
     s.overlay_scale = s.overlay_scale.clamp(0.6, 2.0);
     s.visual_threshold = s.visual_threshold.map(|t| t.clamp(0.3, 0.95));
     s.audio_threshold = s.audio_threshold.map(|t| t.clamp(0.3, 0.95));
+    s.search_words = s.search_words.trim().chars().take(200).collect();
+    if crate::detect::prompt::parse_words(&s.search_words).is_empty() {
+        s.search_words = "SEARCH".into();
+    }
     let prev = {
         let mut st = engine.store.lock();
         let prev = std::mem::replace(&mut st.settings, s.clone());
@@ -141,6 +149,9 @@ pub fn update_settings(app: AppHandle, engine: Eng, settings: Settings) -> Resul
 
 #[tauri::command]
 pub fn visual_take_sample(engine: Eng) -> Result<(), String> {
+    if engine.visual.read().auto() {
+        return Err("Detecția automată nu are nevoie de probe. Probele sunt doar pentru modul manual.".into());
+    }
     let cap = engine.live.lock().capture.clone();
     if cap != "capturing" {
         return Err("Nu văd jocul încă. Pornește Fortnite (sau alege monitorul în Setări).".into());
@@ -305,7 +316,16 @@ pub fn register_hotkeys(app: &AppHandle, s: &Settings) {
                     e.count(-1, Source::Manual);
                 }
                 "visual" => {
-                    if e.live.lock().capture == "capturing" {
+                    if e.visual.read().auto() {
+                        e.emit_calib(crate::engine::CalibPayload {
+                            kind: "visual",
+                            ok: true,
+                            message: "Detecția automată nu are nevoie de probe: citesc singur promptul SEARCH.".into(),
+                            samples: 0,
+                            ready: true,
+                            score: 0.0,
+                        });
+                    } else if e.live.lock().capture == "capturing" {
                         e.visual_sample_req.store(true, Ordering::Relaxed);
                     } else {
                         e.emit_calib(crate::engine::CalibPayload {

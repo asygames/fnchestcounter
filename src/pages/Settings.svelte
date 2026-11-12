@@ -85,6 +85,26 @@
       <label class="row"><span><Icon name="ear" size={16} /> Detecție după sunet</span><input type="checkbox" class="tg" checked={s.audio_enabled} onchange={(e) => save({ audio_enabled: e.currentTarget.checked })} /></label>
 
       <div class="field">
+        <div class="fl">Cum găsesc promptul</div>
+        <div class="seg">
+          <button class:on={s.visual_method === "auto"} onclick={() => save({ visual_method: "auto" })}>Automat (OCR)</button>
+          <button class:on={s.visual_method === "template"} onclick={() => save({ visual_method: "template" })}>Manual (probe)</button>
+        </div>
+        <div class="fh">{s.visual_method === "auto"
+          ? "Citesc textul promptului (SEARCH) oriunde apare lângă cufăr. Nu trebuie calibrare."
+          : "Compar zona aleasă cu promptul învățat din 3 probe. Merge doar dacă promptul stă mereu în același loc."}</div>
+      </div>
+
+      {#if s.visual_method === "auto"}
+      <label class="row"><span>Doar cufere (ignoră lăzile de muniție)</span><input type="checkbox" class="tg" checked={s.chest_only} onchange={(e) => save({ chest_only: e.currentTarget.checked })} /></label>
+      <div class="field">
+        <div class="fl">Cuvântul de pe prompt</div>
+        <input class="txt" type="text" value={s.search_words} maxlength="200" spellcheck="false"
+          onchange={(e) => save({ search_words: e.currentTarget.value })} />
+        <div class="fh">Implicit SEARCH. Dacă joci Fortnite în altă limbă, scrie cuvântul de pe promptul cufărului (mai multe, separate prin virgulă).</div>
+      </div>
+      {:else}
+      <div class="field">
         <div class="fl">Sensibilitate imagine <span class="val">{vAuto ? "automat" : `${Math.round(vThr * 100)}%`}</span></div>
         <div class="sl">
           <input type="range" min="0.3" max="0.95" step="0.01" value={vThr} style="--p:{((vThr - 0.3) / 0.65) * 100}%" disabled={vAuto}
@@ -93,6 +113,7 @@
         </div>
         <div class="fh">Prag mai mic = prinde mai ușor promptul, dar crește riscul de greșeli.</div>
       </div>
+      {/if}
       <div class="field">
         <div class="fl">Sensibilitate sunet <span class="val">{aAuto ? "automat" : `${Math.round(aThr * 100)}%`}</span></div>
         <div class="sl">
@@ -105,7 +126,9 @@
       <div class="field">
         <div class="fl">Cadre analizate pe secundă <span class="val">{s.fps}</span></div>
         <input type="range" min="5" max="30" step="1" value={s.fps} style="--p:{((s.fps - 5) / 25) * 100}%" onchange={(e) => save({ fps: Number(e.currentTarget.value) })} />
-        <div class="fh">15 e suficient. Analiza unui cadru durează sub 1 ms, deci nu afectează FPS-ul jocului.</div>
+        <div class="fh">{s.visual_method === "auto"
+          ? "În modul automat analizez cel mult 10 cadre pe secundă, pe un fir separat, ca să nu încarc jocul."
+          : "15 e suficient. Analiza unui cadru durează sub 1 ms, deci nu afectează FPS-ul jocului."}</div>
       </div>
 
       <div class="field">
@@ -236,6 +259,8 @@
   .seg button:hover { background: var(--card2); }
   .seg button.on { background: var(--gold); color: var(--ink); box-shadow: inset 0 -3px 0 var(--gold3); }
   .seg.small { margin-top: 2px; }
+  .txt { width: 100%; height: 38px; padding: 0 12px; border-radius: 11px; background: #170e0a; border: 2px solid var(--line); color: var(--text); font-family: var(--display); font-weight: 600; font-size: 14px; letter-spacing: 0.04em; }
+  .txt:focus { outline: none; border-color: var(--gold); }
   .sl { display: flex; align-items: center; gap: 12px; }
   .auto { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
   input[type="range"]:disabled { opacity: 0.45; }

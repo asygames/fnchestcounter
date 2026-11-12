@@ -10,6 +10,12 @@
   const live = $derived(app.live);
   const capturing = $derived(live?.capture === "capturing");
   const listening = $derived(live?.audio === "listening");
+  const auto = $derived(s.settings.visual_method === "auto");
+  const ocrBad = $derived(live?.ocr === "missing" || live?.ocr === "error");
+  async function setMethod(m: "auto" | "template") {
+    await app.saveSettings({ visual_method: m });
+    await app.reload();
+  }
 
   // ── Captura pentru alegerea zonei ──
   let thumb = $state<ImageData | null>(null);
@@ -35,8 +41,8 @@
   }
 
   // ── Previzualizarea zonei (se actualizează cât timp pagina e deschisă) ──
-  let cur: HTMLCanvasElement;
-  let tpl: HTMLCanvasElement;
+  let cur = $state<HTMLCanvasElement>();
+  let tpl = $state<HTMLCanvasElement>();
   let hasTpl = $state(false);
   let hasCur = $state(false);
   $effect(() => {
@@ -117,10 +123,33 @@
 
 <div class="top">
   <h1>Calibrare</h1>
-  <p class="muted">Aplicația învață cum arată promptul cufărului și cum sună deschiderea lui, chiar pe jocul tău (rezoluția, limba și setările tale). Durează cam un minut.</p>
+  <p class="muted">{auto
+    ? "Promptul cufărului îl recunosc singur. Opțional, învăț și sunetul deschiderii, ca numărătoarea să fie și mai sigură."
+    : "Aplicația învață cum arată promptul cufărului și cum sună deschiderea lui, chiar pe jocul tău (rezoluția, limba și setările tale). Durează cam un minut."}</p>
+  <div class="seg method">
+    <button class:on={auto} onclick={() => setMethod("auto")}><Icon name="eye" size={16} /> Automat (recomandat)</button>
+    <button class:on={!auto} onclick={() => setMethod("template")}><Icon name="target" size={16} /> Manual, cu probe</button>
+  </div>
 </div>
 
 <div class="grid">
+  {#if auto}
+  <!-- Detectorul automat -->
+  <section class="card step">
+    <div class="sh"><span class="n">1</span><h3>Promptul cufărului</h3>
+      {#if live?.ocr === "ready"}<span class="ok" in:scale><Icon name="check" size={14} /> Automat</span>{/if}
+    </div>
+    <p>Nu trebuie probe. Caut promptul <b>E · SEARCH</b> oriunde apare lângă cufăr și îl citesc cu recunoașterea de text din Windows. Număr doar dacă lângă prompt e un <b>cufăr auriu</b>, nu o ladă de muniție.</p>
+    {#if ocrBad}<p class="warn"><Icon name="info" size={15} /> {live?.ocr_error}</p>{/if}
+    {#if !capturing}<p class="warn"><Icon name="info" size={15} /> {live?.capture === "unsupported" ? "Captura merge doar pe Windows." : "Pornește Fortnite ca să văd promptul."}</p>{/if}
+    <figure class="ocrfig"><canvas class="ocr" bind:this={cur}></canvas>{#if !hasCur}<span class="pe">Apropie-te de un cufăr</span>{/if}<figcaption>Ultimul text alb găsit pe un panou întunecat</figcaption></figure>
+    <div class="facts">
+      <span class="sg" class:lit={!!live?.prompt_text}><Icon name="eye" size={16} /> {live?.prompt_text ? `Citesc: ${live.prompt_text}` : "Nu văd promptul"}</span>
+      <span class="sg" class:lit={!!live?.prompt_text && (live?.gold ?? 0) >= 0.06}><Icon name="chest" size={16} /> Auriu lângă prompt: {Math.round((live?.gold ?? 0) * 100)}%</span>
+    </div>
+    <Meter value={live?.visual_score ?? 0} threshold={0.75} active={!!live?.prompt_visible} />
+  </section>
+  {:else}
   <!-- Pasul 1 -->
   <section class="card step">
     <div class="sh"><span class="n">1</span><h3>Zona promptului</h3></div>
@@ -156,10 +185,11 @@
       <button class="btn small dark" onclick={() => clear("visual")}><Icon name="trash" size={15} /></button>
     </div>
   </section>
+  {/if}
 
-  <!-- Pasul 3 -->
+  <!-- Sunetul -->
   <section class="card step">
-    <div class="sh"><span class="n">3</span><h3>Sunetul cufărului</h3>
+    <div class="sh"><span class="n">{auto ? 2 : 3}</span><h3>Sunetul cufărului{auto ? " (opțional)" : ""}</h3>
       {#if s.calib.audio_ready}<span class="ok" in:scale><Icon name="check" size={14} /> Gata</span>{/if}
     </div>
     <p>Deschide un cufăr și apasă <span class="k">{s.settings.hotkey_audio_sample}</span> <b>imediat după</b> (în 2–3 secunde). Repetă la încă un cufăr. Ține volumul jocului la un nivel normal.</p>
@@ -179,7 +209,7 @@
 
   <!-- Pasul 4 -->
   <section class="card step test">
-    <div class="sh"><span class="n">4</span><h3>Testează</h3></div>
+    <div class="sh"><span class="n">{auto ? 3 : 4}</span><h3>Testează</h3></div>
     <p>Deschide câteva cufere. Fiecare trebuie să apară o singură dată. Dacă numără greșit, corectezi cu <span class="k">{s.settings.hotkey_add}</span> / <span class="k">{s.settings.hotkey_sub}</span> și ajustezi sensibilitatea în Setări.</p>
     <div class="testbox">
       <div><div class="label">Sesiune</div><div class="tv num">{s.session}</div></div>
@@ -220,6 +250,13 @@
   canvas { width: 100%; aspect-ratio: 192 / 85; display: block; border-radius: 10px; border: 2.5px solid var(--ink); background: #0d0806; }
   .pe { position: absolute; inset: 0 0 22px 0; display: grid; place-items: center; font-size: 12px; color: var(--dim); }
   figcaption { font-size: 11.5px; color: var(--dim); margin-top: 5px; text-align: center; }
+  .seg { display: flex; padding: 4px; gap: 4px; background: #170e0a; border: 2px solid var(--line); border-radius: 13px; }
+  .seg button { flex: 1; height: 34px; border-radius: 9px; font-family: var(--display); font-weight: 600; font-size: 14px; color: var(--muted); transition: background 0.15s; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .seg button:hover { background: var(--card2); }
+  .seg button.on { background: var(--gold); color: var(--ink); box-shadow: inset 0 -3px 0 var(--gold3); }
+  .method { margin-top: 14px; max-width: 460px; }
+  .ocrfig canvas.ocr { aspect-ratio: auto; height: 96px; width: 100%; object-fit: contain; background: #f4ede4; }
+  .facts { display: flex; flex-wrap: wrap; gap: 8px; }
   .testbox { display: flex; align-items: center; gap: 22px; padding: 14px 16px; border-radius: 14px; background: rgba(56, 36, 23, 0.55); }
   .tv { font-size: 46px; color: var(--gold); line-height: 1; }
   .sig { display: flex; flex-direction: column; gap: 6px; }

@@ -3,10 +3,11 @@
 use crate::detect::{
     audio::AudioTemplate,
     fusion::{Fusion, Source},
+    prompt::{self, OcrImage, OcrTracker, Rgb},
     visual::{self, Gray, Roi, Template},
 };
-use crate::store::{now_ms, Settings, Store};
-use parking_lot::{Mutex, RwLock};
+use crate::store::{now_ms, Settings, Store, VisualMethod};
+use parking_lot::{Condvar, Mutex, RwLock};
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -23,6 +24,21 @@ pub struct VisualCfg {
     pub roi: Roi,
     pub fps: u32,
     pub require_key: bool,
+    pub method: VisualMethod,
+    pub chest_only: bool,
+    /// Cuvintele promptului, deja normalizate.
+    pub words: Arc<Vec<String>>,
+}
+
+impl VisualCfg {
+    pub fn auto(&self) -> bool {
+        self.method == VisualMethod::Auto
+    }
+}
+
+fn words_of(s: &Settings) -> Arc<Vec<String>> {
+    let w = prompt::parse_words(&s.search_words);
+    Arc::new(if w.is_empty() { prompt::parse_words("SEARCH") } else { w })
 }
 
 pub enum AudioCmd {
@@ -49,6 +65,13 @@ pub struct Live {
     pub audio_device: String,
     pub audio_score: f32,
     pub key_down: bool,
+    /// OCR-ul din Windows: „off” | „ready” | „missing” | „error”.
+    pub ocr: String,
+    pub ocr_error: String,
+    /// Ultimul text de prompt citit (gol dacă nu se vede).
+    pub prompt_text: String,
+    /// Cât auriu e lângă prompt (0..1).
+    pub gold: f32,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -97,6 +120,11 @@ pub struct Engine {
     pub audio_score_bits: AtomicU32,
     pub audio_samples: AtomicU32,
     pub shutdown: AtomicBool,
+    /// Ultimul cadru pentru detectorul automat (număr de ordine, imagine).
+    pub auto_frame: Mutex<Option<(u64, Arc<Rgb>)>>,
+    pub auto_cv: Condvar,
+    /// Ultimul decupaj dat la OCR și ce a citit (pentru previzualizare).
+    pub last_ocr: Mutex<Option<(OcrImage, String)>>,
     start: Instant,
 }
 
@@ -119,6 +147,9 @@ impl Engine {
             roi: s.roi,
             fps: s.fps.clamp(5, 30),
             require_key: s.require_key,
+            method: s.visual_method,
+            chest_only: s.chest_only,
+            words: words_of(s),
         };
         let audio_tpl = store.calib.audio.clone();
         let audio_thr = s
@@ -129,7 +160,7 @@ impl Engine {
         Arc::new(Self {
             app,
             fusion: Mutex::new(Fusion::new(s.mode)),
-            live: Mutex::new(Live { capture: "waiting".into(), audio: "off".into(), ..Default::default() }),
+            live: Mutex::new(Live { capture: "waiting".into(), audio: "off".into(), ocr: "off".into(), ..Default::default() }),
             visual: RwLock::new(visual),
             visual_sample_req: AtomicBool::new(false),
             thumb_req: AtomicBool::new(false),
@@ -145,6 +176,9 @@ impl Engine {
             audio_score_bits: AtomicU32::new(0),
             audio_samples: AtomicU32::new(0),
             shutdown: AtomicBool::new(false),
+            auto_frame: Mutex::new(None),
+            auto_cv: Condvar::new(),
+            last_ocr: Mutex::new(None),
             start: Instant::now(),
             store: Mutex::new(store),
         })
@@ -159,6 +193,49 @@ impl Engine {
     pub fn key_recent(&self) -> bool {
         self.key_down.load(Ordering::Relaxed)
             || self.mono_ms().saturating_sub(self.last_key_ms.load(Ordering::Relaxed)) < 700
+    }
+
+    /// Ultima dată (ms monotone) când tasta de interacțiune era apăsată.
+    pub fn last_key(&self) -> Option<u64> {
+        if self.key_down.load(Ordering::Relaxed) {
+            return Some(self.mono_ms());
+        }
+        match self.last_key_ms.load(Ordering::Relaxed) {
+            0 => None,
+            t => Some(t),
+        }
+    }
+
+    /// Detectorul automat trebuie să citească des: ai apăsat tasta de curând sau se vede un prompt.
+    pub fn auto_active(&self) -> bool {
+        let now = self.mono_ms();
+        self.last_key().is_some_and(|k| now.saturating_sub(k) <= prompt::KEY_WINDOW_MS) || OCR_TRACKER.lock().visible()
+    }
+
+    /// Rezultatul detectorului automat pentru un cadru: s-a văzut promptul („SEARCH”) și cât auriu are lângă el.
+    pub fn on_prompt_obs(&self, found: bool, text: &str, gold: f32) {
+        let cfg = self.visual.read().clone();
+        let now = self.mono_ms();
+        let (opened, visible, gold_max) = {
+            let mut t = OCR_TRACKER.lock();
+            let opened = t.update(found, gold, now, self.last_key(), cfg.require_key, cfg.chest_only);
+            (opened, t.visible(), t.gold_max())
+        };
+        let chest = |g: f32| !cfg.chest_only || g >= prompt::GOLD_MIN;
+        {
+            let mut l = self.live.lock();
+            l.visual_score = match (found, chest(gold)) {
+                (true, true) => 1.0,
+                (true, false) => 0.5,
+                _ => 0.0,
+            };
+            l.prompt_visible = visible && chest(gold_max);
+            l.prompt_text = if found { text.to_string() } else { String::new() };
+            l.gold = gold;
+        }
+        if opened {
+            self.signal(Source::Visual);
+        }
     }
 
     /// Un semnal de la un detector.
@@ -203,6 +280,13 @@ impl Engine {
             v.roi = s.roi.sanitized();
             v.fps = s.fps.clamp(5, 30);
             v.require_key = s.require_key;
+            v.chest_only = s.chest_only;
+            v.words = words_of(s);
+            if v.method != s.visual_method {
+                v.method = s.visual_method;
+                *TRACKER.lock() = None;
+                *OCR_TRACKER.lock() = OcrTracker::default();
+            }
             v.threshold = s
                 .visual_threshold
                 .unwrap_or_else(|| v.tpl.as_ref().map_or(0.6, |t| auto_visual_threshold(t.calib_score)));
@@ -340,7 +424,25 @@ impl Engine {
     }
 
     /// Imaginea curentă a zonei + șablonul + masca, pentru previzualizare (format binar).
+    /// În modul automat: ultimul decupaj citit cu OCR.
     pub fn visual_preview(&self) -> Vec<u8> {
+        if self.visual.read().auto() {
+            let last = self.last_ocr.lock();
+            let mut out = Vec::new();
+            match &*last {
+                Some((img, _)) => {
+                    out.extend_from_slice(&(img.w as u32).to_le_bytes());
+                    out.extend_from_slice(&(img.h as u32).to_le_bytes());
+                    out.push(0);
+                    out.extend_from_slice(&img.px);
+                }
+                None => {
+                    out.extend_from_slice(&[0u8; 8]);
+                    out.push(0);
+                }
+            }
+            return out;
+        }
         let cur = self.last_roi.lock().clone();
         let tpl = self.visual.read().tpl.clone();
         let (w, h) = match (&cur, &tpl) {
@@ -367,3 +469,5 @@ impl Engine {
 
 /// Starea promptului (un singur fir de captură o folosește).
 static TRACKER: Mutex<Option<visual::PromptTracker>> = Mutex::new(None);
+/// Starea promptului citit cu OCR (detectorul automat).
+static OCR_TRACKER: Mutex<OcrTracker> = Mutex::new(OcrTracker::new());

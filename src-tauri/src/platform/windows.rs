@@ -5,6 +5,7 @@
 
 use crate::detect::audio::{AudioDetector, FeatureExtractor};
 use crate::detect::fusion::Source;
+use crate::detect::prompt::{self, OcrImage};
 use crate::detect::visual::{downscale_gray, WORK_W};
 use crate::engine::{AudioCmd, CalibPayload, Engine, Thumb};
 use crate::store::CaptureSource;
@@ -28,6 +29,8 @@ const FORTNITE_EXE: &str = "fortniteclient-win64-shipping.exe";
 pub fn start(engine: Arc<Engine>) {
     let e = engine.clone();
     thread::Builder::new().name("capture".into()).spawn(move || capture_loop(e)).ok();
+    let e = engine.clone();
+    thread::Builder::new().name("ocr".into()).spawn(move || ocr_loop(e)).ok();
     let e = engine.clone();
     thread::Builder::new().name("audio".into()).spawn(move || audio_loop(e)).ok();
     let e = engine;
@@ -66,7 +69,9 @@ impl GraphicsCaptureApiHandler for Capture {
             return Ok(());
         }
         let cfg = e.visual.read().clone();
-        let interval = Duration::from_millis(1000 / cfg.fps.max(1) as u64);
+        // Detectorul automat copiază o zonă mare: 10 cadre/s îi ajung și nu încarcă placa video.
+        let fps = if cfg.auto() { cfg.fps.min(10) } else { cfg.fps };
+        let interval = Duration::from_millis(1000 / fps.max(1) as u64);
         let now = Instant::now();
         let thumb_wanted = e.thumb_req.load(Ordering::Relaxed);
         if !thumb_wanted && self.last.is_some_and(|t| now.duration_since(t) < interval) {
@@ -88,6 +93,33 @@ impl GraphicsCaptureApiHandler for Capture {
             }
         }
 
+        if cfg.auto() {
+            // Promptul se mută odată cu cufărul: luăm toată zona centrală, color,
+            // micșorată cel mult la 1440p. Analiza (OCR) o face firul „ocr”.
+            let (x0, y0, x1, y1) = prompt::SEARCH_REGION.pixels(fw, fh);
+            let s = (prompt::MAX_FRAME_H as f32 / fh as f32).min(1.0);
+            let img = {
+                let mut buf = frame.buffer_crop(x0, y0, x1, y1)?;
+                let (w, h, pitch) = (buf.width() as usize, buf.height() as usize, buf.row_pitch() as usize);
+                let raw = buf.as_raw_buffer();
+                let (ow, oh) = (((w as f32 * s) as usize).max(1), ((h as f32 * s) as usize).max(1));
+                prompt::downscale_rgb(raw, w, h, pitch, true, ow, oh)
+            };
+            {
+                let mut slot = e.auto_frame.lock();
+                let seq = slot.as_ref().map_or(0, |f| f.0) + 1;
+                *slot = Some((seq, Arc::new(img)));
+            }
+            e.auto_cv.notify_one();
+            {
+                let mut l = e.live.lock();
+                l.frame_w = fw;
+                l.frame_h = fh;
+            }
+            self.tick_fps();
+            return Ok(());
+        }
+
         // Copiem din GPU doar zona de interes, nu tot cadrul.
         let (x0, y0, x1, y1) = cfg.roi.pixels(fw, fh);
         let work_h = cfg.roi.work_h(fw, fh);
@@ -99,24 +131,193 @@ impl GraphicsCaptureApiHandler for Capture {
         };
         e.on_roi_frame(img, fw, fh);
 
-        self.frames += 1;
-        let el = self.fps_t0.elapsed();
         let analyze_ms = t0.elapsed().as_secs_f32() * 1000.0;
         {
             let mut l = e.live.lock();
             l.analyze_ms = l.analyze_ms * 0.9 + analyze_ms * 0.1;
-            if el >= Duration::from_secs(1) {
-                l.fps = self.frames as f32 / el.as_secs_f32();
-                self.frames = 0;
-                self.fps_t0 = Instant::now();
-            }
         }
+        self.tick_fps();
         Ok(())
     }
 
     fn on_closed(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
+}
+
+impl Capture {
+    fn tick_fps(&mut self) {
+        self.frames += 1;
+        let el = self.fps_t0.elapsed();
+        if el >= Duration::from_secs(1) {
+            self.engine.live.lock().fps = self.frames as f32 / el.as_secs_f32();
+            self.frames = 0;
+            self.fps_t0 = Instant::now();
+        }
+    }
+}
+
+// ───────────────────────────── OCR (detectorul automat) ─────────────────────────────
+
+/// OCR-ul inclus în Windows 10/11 (Windows.Media.Ocr). Nu trebuie instalat nimic în plus,
+/// doar o limbă cu alfabet latin (engleza vine aproape mereu cu Windows).
+struct Ocr {
+    engine: windows::Media::Ocr::OcrEngine,
+    lang: String,
+}
+
+impl Ocr {
+    fn new() -> Result<Self, String> {
+        use windows::core::HSTRING;
+        use windows::Globalization::Language;
+        use windows::Media::Ocr::OcrEngine;
+
+        let make = |engine: OcrEngine| {
+            let lang = engine.RecognizerLanguage().and_then(|l| l.LanguageTag()).map(|t| t.to_string()).unwrap_or_default();
+            Self { engine, lang }
+        };
+        // Promptul e în engleză („SEARCH”): preferăm recunoașterea pentru engleză.
+        for tag in ["en-US", "en-GB", "en"] {
+            let Ok(lang) = Language::CreateLanguage(&HSTRING::from(tag)) else { continue };
+            if OcrEngine::IsLanguageSupported(&lang).unwrap_or(false) {
+                if let Ok(engine) = OcrEngine::TryCreateFromLanguage(&lang) {
+                    return Ok(make(engine));
+                }
+            }
+        }
+        if let Ok(engine) = OcrEngine::TryCreateFromUserProfileLanguages() {
+            return Ok(make(engine));
+        }
+        if let Ok(langs) = OcrEngine::AvailableRecognizerLanguages() {
+            for i in 0..langs.Size().unwrap_or(0) {
+                if let Ok(engine) = langs.GetAt(i).and_then(|l| OcrEngine::TryCreateFromLanguage(&l)) {
+                    return Ok(make(engine));
+                }
+            }
+        }
+        Err("Windows nu are recunoaștere de text (OCR) pentru nicio limbă. Adaugă limba English (United States) din Setări Windows → Oră și limbă → Limbă și regiune, apoi repornește aplicația.".into())
+    }
+
+    fn read(&self, img: &OcrImage) -> windows::core::Result<String> {
+        use windows::Graphics::Imaging::{BitmapPixelFormat, SoftwareBitmap};
+        use windows::Security::Cryptography::CryptographicBuffer;
+
+        let mut bgra = Vec::with_capacity(img.w * img.h * 4);
+        for &v in &img.px {
+            bgra.extend_from_slice(&[v, v, v, 255]);
+        }
+        let buf = CryptographicBuffer::CreateFromByteArray(&bgra)?;
+        let bmp = SoftwareBitmap::CreateCopyFromBuffer(&buf, BitmapPixelFormat::Bgra8, img.w as i32, img.h as i32)?;
+        let res = self.engine.RecognizeAsync(&bmp)?.join()?;
+        Ok(res.Text()?.to_string())
+    }
+}
+
+fn set_ocr(e: &Engine, state: &str, err: &str) {
+    let mut l = e.live.lock();
+    l.ocr = state.into();
+    l.ocr_error = err.into();
+}
+
+fn ocr_loop(e: Arc<Engine>) {
+    use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+    unsafe {
+        let _ = RoInitialize(RO_INIT_MULTITHREADED);
+    }
+    let ocr = match Ocr::new() {
+        Ok(o) => {
+            log::info!("OCR pornit ({})", o.lang);
+            set_ocr(&e, "ready", "");
+            Some(o)
+        }
+        Err(msg) => {
+            log::warn!("{msg}");
+            set_ocr(&e, "missing", &msg);
+            None
+        }
+    };
+    let mut last_seq = 0u64;
+    let mut last_ocr = Instant::now() - Duration::from_secs(10);
+    let mut ocr_errors = 0u32;
+    loop {
+        if e.shutdown.load(Ordering::Relaxed) {
+            return;
+        }
+        // Așteptăm un cadru nou de la captură (luăm mereu doar ultimul).
+        let img = {
+            let mut slot = e.auto_frame.lock();
+            if slot.as_ref().is_none_or(|f| f.0 == last_seq) {
+                e.auto_cv.wait_for(&mut slot, Duration::from_millis(500));
+            }
+            match slot.as_ref() {
+                Some((seq, img)) if *seq != last_seq => {
+                    last_seq = *seq;
+                    img.clone()
+                }
+                _ => continue,
+            }
+        };
+        let cfg = e.visual.read().clone();
+        if !cfg.auto() || !cfg.enabled {
+            continue;
+        }
+        let t0 = Instant::now();
+        let cands = prompt::find_candidates(&img);
+        let Some(ocr) = ocr.as_ref().filter(|_| !cands.is_empty()) else {
+            e.on_prompt_obs(false, "", 0.0);
+            report_ms(&e, t0);
+            continue;
+        };
+        // Fără tastă apăsată și fără prompt pe ecran citim rar (3 pe secundă), ca să nu consumăm degeaba.
+        if !e.auto_active() && last_ocr.elapsed() < Duration::from_millis(330) {
+            continue;
+        }
+        last_ocr = Instant::now();
+        let mut hit: Option<(String, f32)> = None;
+        let mut shown: Option<(OcrImage, String)> = None;
+        for c in cands.iter().take(4) {
+            let crop = prompt::ocr_crop(&img, c.b);
+            let text = match ocr.read(&crop) {
+                Ok(t) => {
+                    ocr_errors = 0;
+                    t
+                }
+                Err(err) => {
+                    ocr_errors += 1;
+                    if ocr_errors == 20 {
+                        log::warn!("OCR: {err}");
+                        set_ocr(&e, "error", &format!("OCR-ul din Windows dă erori: {err}"));
+                    }
+                    String::new()
+                }
+            };
+            if let Some(word) = prompt::match_words(&text, &cfg.words) {
+                hit = Some((word, prompt::gold_fraction(&img, c.b)));
+                shown = Some((crop, text));
+                break;
+            }
+            if shown.is_none() {
+                shown = Some((crop, text));
+            }
+        }
+        if ocr_errors == 0 && e.live.lock().ocr != "ready" {
+            set_ocr(&e, "ready", "");
+        }
+        if let Some(s) = shown {
+            *e.last_ocr.lock() = Some(s);
+        }
+        match hit {
+            Some((word, gold)) => e.on_prompt_obs(true, &word, gold),
+            None => e.on_prompt_obs(false, "", 0.0),
+        }
+        report_ms(&e, t0);
+    }
+}
+
+fn report_ms(e: &Engine, t0: Instant) {
+    let ms = t0.elapsed().as_secs_f32() * 1000.0;
+    let mut l = e.live.lock();
+    l.analyze_ms = l.analyze_ms * 0.9 + ms * 0.1;
 }
 
 fn make_thumb(raw: &[u8], w: usize, h: usize, pitch: usize, out_w: usize) -> Thumb {
@@ -505,5 +706,47 @@ fn key_loop(e: Arc<Engine>) {
         }
         e.live.lock().key_down = down;
         thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::detect::prompt::tests::{load_png, scaled, SHOT};
+
+    /// Rulează în CI pe Windows: OCR-ul real din Windows trebuie să citească „SEARCH”
+    /// din captura reală a promptului de cufăr.
+    #[test]
+    fn windows_ocr_reads_search_from_real_screenshot() {
+        use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+        unsafe {
+            let _ = RoInitialize(RO_INIT_MULTITHREADED);
+        }
+        let ocr = match Ocr::new() {
+            Ok(o) => o,
+            Err(err) => {
+                eprintln!("OCR INDISPONIBIL pe acest Windows, testul e sărit: {err}");
+                return;
+            }
+        };
+        eprintln!("OCR: limba {}", ocr.lang);
+        let words = prompt::parse_words("SEARCH");
+        let shot = load_png(SHOT);
+        for (name, img) in [("1x", shot.clone()), ("2x", scaled(&shot, 2.0))] {
+            let cands = prompt::find_candidates(&img);
+            let mut texts = Vec::new();
+            let mut found = false;
+            for c in cands.iter().take(4) {
+                let t0 = Instant::now();
+                let text = ocr.read(&prompt::ocr_crop(&img, c.b)).expect("OCR");
+                texts.push(format!("{text:?} ({:.1} ms)", t0.elapsed().as_secs_f32() * 1000.0));
+                if prompt::match_words(&text, &words).is_some() {
+                    found = true;
+                    break;
+                }
+            }
+            eprintln!("OCR {name}: {texts:?}");
+            assert!(found, "OCR nu a găsit SEARCH la {name}: {texts:?}");
+        }
     }
 }

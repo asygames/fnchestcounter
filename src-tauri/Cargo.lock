@@ -1129,6 +1129,7 @@ dependencies = [
  "cpal",
  "log",
  "parking_lot",
+ "png",
  "rustfft",
  "serde",
  "serde_json",

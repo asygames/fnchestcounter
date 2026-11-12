@@ -70,6 +70,22 @@ pub struct Settings {
     pub hotkey_visual_sample: String,
     pub hotkey_audio_sample: String,
     pub reduce_motion: bool,
+    /// Cum găsim promptul: automat (OCR, fără calibrare) sau cu șablonul din probe.
+    pub visual_method: VisualMethod,
+    /// Numără doar cuferele (aurii), nu și lăzile de muniție (au tot „SEARCH”).
+    pub chest_only: bool,
+    /// Cuvintele promptului, separate prin virgulă (pentru jocul în altă limbă).
+    pub search_words: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum VisualMethod {
+    /// Citește textul promptului („SEARCH”) oriunde lângă centrul ecranului. Recomandat.
+    #[default]
+    Auto,
+    /// Șablonul învățat din probe, într-o zonă fixă (metoda veche).
+    Template,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -108,6 +124,9 @@ impl Default for Settings {
             hotkey_visual_sample: "F8".into(),
             hotkey_audio_sample: "F7".into(),
             reduce_motion: false,
+            visual_method: VisualMethod::Auto,
+            chest_only: true,
+            search_words: "SEARCH".into(),
         }
     }
 }

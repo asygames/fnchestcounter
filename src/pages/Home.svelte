@@ -112,6 +112,8 @@
       <div class="hint">
         {#if !s.settings.visual_enabled}Oprită din setări
         {:else if live?.capture !== "capturing"}{live?.capture === "unsupported" ? "Merge doar pe Windows" : live?.capture_error || "Aștept fereastra Fortnite"}
+        {:else if s.calib.visual_auto && (live?.ocr === "missing" || live?.ocr === "error")}{live.ocr_error}
+        {:else if s.calib.visual_auto}{live?.prompt_text ? `Citesc „${live.prompt_text}” · auriu ${Math.round(live.gold * 100)}%` : "Caut promptul SEARCH (automat)"}
         {:else if !s.calib.visual_ready}Necalibrată: fă 3 probe în Calibrare
         {:else}Potrivire cu promptul cufărului{/if}
       </div>
