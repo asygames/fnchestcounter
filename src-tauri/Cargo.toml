@@ -1,6 +1,6 @@
 [package]
 name = "fn-chest-counter"
-version = "0.1.0"
+version = "0.1.1"
 description = "Numără automat cuferele deschise în Fortnite, citind doar imaginea și sunetul de pe ecran."
 authors = ["asygames"]
 edition = "2021"
