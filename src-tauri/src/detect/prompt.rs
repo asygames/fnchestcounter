@@ -115,9 +115,9 @@ pub fn find_candidates(img: &Rgb) -> Vec<Candidate> {
         let (r, g, b) = (img.px[i * 3] as i32, img.px[i * 3 + 1] as i32, img.px[i * 3 + 2] as i32);
         let l = (77 * r + 150 * g + 29 * b) >> 8;
         let sat = r.max(g).max(b) - r.min(g).min(b);
-        if l >= 175 && sat <= 64 {
+        if l >= 170 && sat <= 70 {
             *fl = F_WHITE;
-        } else if l <= 95 {
+        } else if l <= 110 {
             *fl = F_DARK;
         }
     }
@@ -220,7 +220,7 @@ pub fn find_candidates(img: &Rgb) -> Vec<Candidate> {
                     }
                 }
             }
-            if dark * 100 < (dark + other) * 45 {
+            if dark * 100 < (dark + other) * 35 {
                 continue;
             }
             let (mx, my) = (x0 as f32 + bw as f32 / 2.0, y0 as f32 + bh as f32 / 2.0);
@@ -268,6 +268,45 @@ pub fn ocr_crop(img: &Rgb, b: BoxI) -> OcrImage {
         }
     }
     OcrImage { w: ow, h: oh, px }
+}
+
+/// Zona din jurul centrului ecranului (în coordonatele zonei de căutare) pe care o citim
+/// direct cu OCR când ai apăsat tasta și căutarea rapidă n-a găsit promptul.
+pub fn center_area(img: &Rgb) -> BoxI {
+    let (w, h) = (img.w as f32, img.h as f32);
+    // Centrul ecranului e la ~(0,50; 0,475) din zona de căutare; promptul stă de obicei
+    // lângă cufărul din fața ta, deci luăm o zonă largă în jurul lui.
+    let (x0, x1) = ((w * 0.20) as i32, (w * 0.86) as i32);
+    let (y0, y1) = ((h * 0.18) as i32, (h * 0.84) as i32);
+    BoxI { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+}
+
+/// Pregătește o zonă mare pentru OCR: text alb → negru, restul alb, mărită ca textul
+/// promptului să aibă ~20–30 px. Întoarce imaginea și factorul de mărire.
+pub fn ocr_area(img: &Rgb, a: BoxI) -> (OcrImage, f32) {
+    // Promptul are ~1,4% din înălțimea cadrului; zona de căutare e 80% din cadru.
+    let frame_h = img.h as f32 / 0.80;
+    let text_h = (frame_h * 0.014).max(4.0);
+    let scale = (24.0 / text_h).clamp(1.0, 3.0);
+    let x0 = a.x.max(0) as usize;
+    let y0 = a.y.max(0) as usize;
+    let x1 = ((a.x + a.w) as usize).min(img.w);
+    let y1 = ((a.y + a.h) as usize).min(img.h);
+    let (cw, ch) = (x1.saturating_sub(x0).max(1), y1.saturating_sub(y0).max(1));
+    let (ow, oh) = (((cw as f32 * scale) as usize).max(1), ((ch as f32 * scale) as usize).max(1));
+    let mut px = vec![255u8; ow * oh];
+    for oy in 0..oh {
+        let sy = (y0 + ((oy as f32 / scale) as usize).min(ch - 1)).min(img.h - 1);
+        for ox in 0..ow {
+            let sx = (x0 + ((ox as f32 / scale) as usize).min(cw - 1)).min(img.w - 1);
+            let (r, g, b) = img.rgb(sx, sy);
+            let (r, g, b) = (r as f32, g as f32, b as f32);
+            let v = 0.299 * r + 0.587 * g + 0.114 * b - 1.5 * (r.max(g).max(b) - r.min(g).min(b));
+            let t = ((v - 120.0) / 80.0).clamp(0.0, 1.0);
+            px[oy * ow + ox] = (255.0 * (1.0 - t)) as u8;
+        }
+    }
+    (OcrImage { w: ow, h: oh, px }, scale)
 }
 
 /// Ce parte din zona din jurul promptului e aurie (cufărul stă în stânga/sub prompt).
@@ -546,6 +585,13 @@ pub(crate) mod tests {
         let pos = c.iter().take(4).position(|c| overlaps(c.b, want));
         assert!(pos.is_some(), "promptul nu e în primii 4: {c:?}");
         let b = c[pos.unwrap()].b;
+        let area = center_area(&region);
+        assert!(
+            area.x <= want.x && area.y <= want.y && area.x + area.w >= want.x + want.w && area.y + area.h >= want.y + want.h,
+            "zona centrală {area:?} nu conține promptul {want:?}"
+        );
+        let (oimg, scale) = ocr_area(&region, area);
+        assert!(oimg.w > area.w as usize && scale >= 1.0);
         let gold = gold_fraction(&region, b);
         eprintln!("cadru întreg: {} candidați, promptul pe locul {}, auriu {:.0}%", c.len(), pos.unwrap() + 1, gold * 100.0);
         assert!(gold >= GOLD_MIN * 2.0, "auriu {gold}");

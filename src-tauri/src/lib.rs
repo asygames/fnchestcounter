@@ -33,6 +33,10 @@ pub fn run() {
             commands::visual_preview,
             commands::get_thumbnail,
             commands::overlay_edit,
+            commands::auto_diag,
+            commands::auto_diag_image,
+            commands::save_diagnostic,
+            commands::open_diagnostics,
             commands::simulate_chest,
         ])
         .setup(|app| {

@@ -33,6 +33,7 @@ export interface Settings {
   hotkey_visual_sample: string;
   hotkey_audio_sample: string;
   hotkey_overlay_move: string;
+  hotkey_diag: string;
   reduce_motion: boolean;
   auto_update: boolean;
   /** „auto” = citesc promptul SEARCH cu OCR, fără calibrare; „template” = probe într-o zonă fixă. */
@@ -59,6 +60,17 @@ export interface Live {
   ocr_error: string;
   prompt_text: string;
   gold: number;
+}
+
+export interface DiagCand { x: number; y: number; w: number; h: number; ocr: boolean; text: string; matched: boolean; gold: number; fallback: boolean }
+export interface AutoDiag {
+  version: string;
+  live: Live;
+  key_ms_ago: number | null;
+  diag: {
+    region_w: number; region_h: number; cands: DiagCand[]; ocr_lang: string;
+    find_ms: number; ocr_ms: number; frames: number; ocr_runs: number; fallback_runs: number; fallback_text: string;
+  };
 }
 
 export interface ChestEvent { ts: number; source: Source; delta: number }
@@ -134,6 +146,10 @@ export const api = {
   visualPreview: async (): Promise<ArrayBuffer> =>
     isTauri ? tauriInvoke<ArrayBuffer>("visual_preview") : mock.visualPreview(),
   thumbnail: async (): Promise<ArrayBuffer> => (isTauri ? tauriInvoke<ArrayBuffer>("get_thumbnail") : mock.thumbnail()),
+  autoDiag: () => (isTauri ? tauriInvoke<AutoDiag>("auto_diag") : mock.autoDiag()),
+  autoDiagImage: async (): Promise<ArrayBuffer> => (isTauri ? tauriInvoke<ArrayBuffer>("auto_diag_image") : mock.autoDiagImage()),
+  saveDiagnostic: () => (isTauri ? tauriInvoke<string>("save_diagnostic") : Promise.resolve("C:\\Users\\Jucator\\AppData\\Roaming\\com.asygames.fnchestcounter\\diagnostic")),
+  openDiagnostics: () => (isTauri ? tauriInvoke<void>("open_diagnostics") : Promise.resolve()),
   overlayEdit: (editing: boolean) => (isTauri ? tauriInvoke<void>("overlay_edit", { editing }) : Promise.resolve()),
   simulate: (source?: Source) => (isTauri ? tauriInvoke<void>("simulate_chest", { source }) : mock.add(1, source ?? "visual")),
 };
@@ -206,6 +222,7 @@ const mock = (() => {
       hotkey_visual_sample: "F8",
       hotkey_audio_sample: "F7",
       hotkey_overlay_move: "F6",
+      hotkey_diag: "F5",
       reduce_motion: false,
       auto_update: true,
       visual_method: "auto",
@@ -319,6 +336,37 @@ const mock = (() => {
         buf[9 + i] = v;
         buf[9 + w * h + i] = ui ? v : 90;
         buf[9 + 2 * w * h + i] = text || key ? 255 : 0;
+      }
+      return buf.buffer;
+    },
+    async autoDiag(): Promise<AutoDiag> {
+      const on = snap.live.prompt_visible;
+      return {
+        version: snap.version, live: snap.live, key_ms_ago: on ? 300 : null,
+        diag: {
+          region_w: 1792, region_h: 1152, ocr_lang: "en-US", find_ms: 6.8, ocr_ms: 11.2, frames: 1234, ocr_runs: 210, fallback_runs: 4,
+          fallback_text: on ? "E SEARCH 199,680" : "",
+          cands: [
+            ...(on ? [{ x: 1060, y: 548, w: 104, h: 20, ocr: true, text: "SEARCH", matched: true, gold: 0.34, fallback: false }] : []),
+            { x: 130, y: 640, w: 330, h: 18, ocr: true, text: "Bronwyn82199 eliminated", matched: false, gold: 0, fallback: false },
+            { x: 140, y: 690, w: 300, h: 18, ocr: false, text: "", matched: false, gold: 0, fallback: false },
+          ],
+        },
+      };
+    },
+    async autoDiagImage(): Promise<ArrayBuffer> {
+      const w = 720, h = 463;
+      const buf = new Uint8Array(8 + w * h * 4);
+      const dv = new DataView(buf.buffer);
+      dv.setUint32(0, w, true); dv.setUint32(4, h, true);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const o = 8 + (y * w + x) * 4;
+        const chest = x > 330 && x < 420 && y > 190 && y < 290;
+        const panel = x > 410 && x < 480 && y > 210 && y < 236;
+        buf[o] = chest ? 235 : panel ? 40 : 90 + (x % 50);
+        buf[o + 1] = chest ? 185 : panel ? 32 : 110 + (y % 40);
+        buf[o + 2] = chest ? 50 : panel ? 28 : 70;
+        buf[o + 3] = 255;
       }
       return buf.buffer;
     },

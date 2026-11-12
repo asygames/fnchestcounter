@@ -74,6 +74,8 @@ pub struct Settings {
     pub hotkey_audio_sample: String,
     /// Tasta care pornește/oprește mutarea overlay-ului (merge și din joc).
     pub hotkey_overlay_move: String,
+    /// Tasta care salvează un diagnostic al detecției (imagine + raport).
+    pub hotkey_diag: String,
     pub reduce_motion: bool,
     /// Instalează singur actualizările (când Fortnite nu e deschis).
     pub auto_update: bool,
@@ -131,6 +133,7 @@ impl Default for Settings {
             hotkey_visual_sample: "F8".into(),
             hotkey_audio_sample: "F7".into(),
             hotkey_overlay_move: "F6".into(),
+            hotkey_diag: "F5".into(),
             reduce_motion: false,
             auto_update: true,
             visual_method: VisualMethod::Auto,

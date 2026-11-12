@@ -32,6 +32,7 @@ class AppState {
     });
     await listen<null>("refresh", () => this.reload());
     await listen<string>("hotkey-error", (m) => this.toast("err", m));
+    await listen<string>("toast-info", (m) => this.toast("info", m));
   }
 
   async reload() {

@@ -17,7 +17,7 @@
   ];
 
   // ── Legarea tastelor ──
-  let binding = $state<null | "interact" | "hotkey_add" | "hotkey_sub" | "hotkey_visual_sample" | "hotkey_audio_sample" | "hotkey_overlay_move">(null);
+  let binding = $state<null | "interact" | "hotkey_add" | "hotkey_sub" | "hotkey_visual_sample" | "hotkey_audio_sample" | "hotkey_overlay_move" | "hotkey_diag">(null);
   function onKey(e: KeyboardEvent) {
     if (!binding) return;
     e.preventDefault();
@@ -183,7 +183,7 @@
     <section class="card sec">
       <h3><Icon name="bolt" size={18} /> Scurtături globale</h3>
       <p class="fh">Merg și când ești în joc. Click pe tastă, apoi apasă combinația nouă (Backspace o șterge).</p>
-      {#each [["hotkey_add", "Adaugă un cufăr (+1)"], ["hotkey_sub", "Scade un cufăr (−1)"], ["hotkey_visual_sample", "Probă vizuală (calibrare)"], ["hotkey_audio_sample", "Probă de sunet (calibrare)"], ["hotkey_overlay_move", "Mută overlay-ul (și din joc)"]] as [k, label]}
+      {#each [["hotkey_add", "Adaugă un cufăr (+1)"], ["hotkey_sub", "Scade un cufăr (−1)"], ["hotkey_visual_sample", "Probă vizuală (calibrare)"], ["hotkey_audio_sample", "Probă de sunet (calibrare)"], ["hotkey_overlay_move", "Mută overlay-ul (și din joc)"], ["hotkey_diag", "Salvează diagnostic (când nu vede cufărul)"]] as [k, label]}
         <div class="row">
           <span>{label}</span>
           <button class="bind" class:listening={binding === k} onclick={() => (binding = binding === k ? null : (k as typeof binding))}>

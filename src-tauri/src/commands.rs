@@ -123,6 +123,7 @@ pub fn update_settings(app: AppHandle, engine: Eng, settings: Settings) -> Resul
         &settings.hotkey_visual_sample,
         &settings.hotkey_audio_sample,
         &settings.hotkey_overlay_move,
+        &settings.hotkey_diag,
     ] {
         if !hk.is_empty() {
             hk.parse::<Shortcut>().map_err(|e| format!("Scurtătură invalidă „{hk}”: {e}"))?;
@@ -221,6 +222,32 @@ pub async fn get_thumbnail(engine: State<'_, Arc<Engine>>) -> Result<Response, S
     }
     engine.thumb_req.store(false, Ordering::Relaxed);
     Err("Jocul nu a trimis niciun cadru (e minimizat?).".into())
+}
+
+#[tauri::command]
+pub fn auto_diag(engine: Eng) -> serde_json::Value {
+    engine.diag_json()
+}
+
+#[tauri::command]
+pub fn auto_diag_image(engine: Eng) -> Response {
+    Response::new(engine.diag_image(720))
+}
+
+#[tauri::command]
+pub fn save_diagnostic(engine: Eng) -> Result<String, String> {
+    engine.save_diagnostic().map(|d| d.display().to_string())
+}
+
+#[tauri::command]
+pub fn open_diagnostics(engine: Eng) -> Result<(), String> {
+    let dir = engine.store.lock().dir().join("diagnostic");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    std::process::Command::new("explorer").arg(&dir).spawn().map_err(|e| e.to_string())?;
+    #[cfg(not(windows))]
+    let _ = dir;
+    Ok(())
 }
 
 #[tauri::command]
@@ -337,12 +364,13 @@ pub fn apply_overlay(app: &AppHandle, s: &Settings) {
 pub fn register_hotkeys(app: &AppHandle, s: &Settings) {
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
-    let bindings: [(&str, &'static str); 5] = [
+    let bindings: [(&str, &'static str); 6] = [
         (&s.hotkey_add, "add"),
         (&s.hotkey_sub, "sub"),
         (&s.hotkey_visual_sample, "visual"),
         (&s.hotkey_audio_sample, "audio"),
         (&s.hotkey_overlay_move, "overlay_move"),
+        (&s.hotkey_diag, "diag"),
     ];
     for (key, action) in bindings {
         if key.is_empty() {
@@ -385,6 +413,13 @@ pub fn register_hotkeys(app: &AppHandle, s: &Settings) {
                     }
                 }
                 "audio" => e.audio_cmds.lock().push_back(AudioCmd::TakeSample),
+                "diag" => {
+                    let msg = match e.save_diagnostic() {
+                        Ok(dir) => format!("Diagnostic salvat în {}", dir.display()),
+                        Err(err) => format!("Nu am putut salva diagnosticul: {err}"),
+                    };
+                    let _ = app.emit("toast-info", msg);
+                }
                 "overlay_move" => {
                     let editing = !e.overlay_editing.load(Ordering::Relaxed);
                     set_overlay_edit(app, editing);

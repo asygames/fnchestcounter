@@ -198,7 +198,27 @@ impl Ocr {
         Err("Windows nu are recunoaștere de text (OCR) pentru nicio limbă. Adaugă limba English (United States) din Setări Windows → Oră și limbă → Limbă și regiune, apoi repornește aplicația.".into())
     }
 
+    /// Cuvintele citite, cu dreptunghiul fiecăruia (în pixelii imaginii date).
+    fn read_words(&self, img: &OcrImage) -> windows::core::Result<Vec<(String, windows::Foundation::Rect)>> {
+        let res = self.recognize(img)?;
+        let mut out = Vec::new();
+        let lines = res.Lines()?;
+        for i in 0..lines.Size()? {
+            let words = lines.GetAt(i)?.Words()?;
+            for j in 0..words.Size()? {
+                let w = words.GetAt(j)?;
+                out.push((w.Text()?.to_string(), w.BoundingRect()?));
+            }
+        }
+        Ok(out)
+    }
+
+    #[cfg(test)]
     fn read(&self, img: &OcrImage) -> windows::core::Result<String> {
+        Ok(self.recognize(img)?.Text()?.to_string())
+    }
+
+    fn recognize(&self, img: &OcrImage) -> windows::core::Result<windows::Media::Ocr::OcrResult> {
         use windows::Graphics::Imaging::{BitmapPixelFormat, SoftwareBitmap};
         use windows::Security::Cryptography::CryptographicBuffer;
 
@@ -208,8 +228,7 @@ impl Ocr {
         }
         let buf = CryptographicBuffer::CreateFromByteArray(&bgra)?;
         let bmp = SoftwareBitmap::CreateCopyFromBuffer(&buf, BitmapPixelFormat::Bgra8, img.w as i32, img.h as i32)?;
-        let res = self.engine.RecognizeAsync(&bmp)?.join()?;
-        Ok(res.Text()?.to_string())
+        self.engine.RecognizeAsync(&bmp)?.join()
     }
 }
 
@@ -220,6 +239,7 @@ fn set_ocr(e: &Engine, state: &str, err: &str) {
 }
 
 fn ocr_loop(e: Arc<Engine>) {
+    use crate::engine::DiagCand;
     use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
     unsafe {
         let _ = RoInitialize(RO_INIT_MULTITHREADED);
@@ -228,6 +248,7 @@ fn ocr_loop(e: Arc<Engine>) {
         Ok(o) => {
             log::info!("OCR pornit ({})", o.lang);
             set_ocr(&e, "ready", "");
+            e.diag.lock().ocr_lang = o.lang.clone();
             Some(o)
         }
         Err(msg) => {
@@ -238,6 +259,7 @@ fn ocr_loop(e: Arc<Engine>) {
     };
     let mut last_seq = 0u64;
     let mut last_ocr = Instant::now() - Duration::from_secs(10);
+    let mut last_fallback = Instant::now() - Duration::from_secs(10);
     let mut ocr_errors = 0u32;
     loop {
         if e.shutdown.load(Ordering::Relaxed) {
@@ -263,52 +285,117 @@ fn ocr_loop(e: Arc<Engine>) {
         }
         let t0 = Instant::now();
         let cands = prompt::find_candidates(&img);
-        let Some(ocr) = ocr.as_ref().filter(|_| !cands.is_empty()) else {
-            e.on_prompt_obs(false, "", 0.0);
-            report_ms(&e, t0);
-            continue;
-        };
-        // Fără tastă apăsată și fără prompt pe ecran citim rar (3 pe secundă), ca să nu consumăm degeaba.
-        if !e.auto_active() && last_ocr.elapsed() < Duration::from_millis(330) {
-            continue;
-        }
-        last_ocr = Instant::now();
+        let find_ms = t0.elapsed().as_secs_f32() * 1000.0;
+        let now = e.mono_ms();
+        let key_recent = e.last_key().is_some_and(|k| now.saturating_sub(k) <= 1500);
+        let mut diag: Vec<DiagCand> = cands.iter().map(|c| DiagCand::from_box(c.b)).collect();
         let mut hit: Option<(String, f32)> = None;
         let mut shown: Option<(OcrImage, String)> = None;
-        for c in cands.iter().take(4) {
-            let crop = prompt::ocr_crop(&img, c.b);
-            let text = match ocr.read(&crop) {
-                Ok(t) => {
-                    ocr_errors = 0;
-                    t
+        let mut did_ocr = false;
+        let mut fallback_text = String::new();
+
+        let read = |o: &Ocr, img: &OcrImage, errors: &mut u32| -> Vec<(String, windows::Foundation::Rect)> {
+            match o.read_words(img) {
+                Ok(w) => {
+                    *errors = 0;
+                    w
                 }
                 Err(err) => {
-                    ocr_errors += 1;
-                    if ocr_errors == 20 {
+                    *errors += 1;
+                    if *errors == 20 {
                         log::warn!("OCR: {err}");
                         set_ocr(&e, "error", &format!("OCR-ul din Windows dă erori: {err}"));
                     }
-                    String::new()
+                    Vec::new()
                 }
-            };
-            if let Some(word) = prompt::match_words(&text, &cfg.words) {
-                hit = Some((word, prompt::gold_fraction(&img, c.b)));
-                shown = Some((crop, text));
-                break;
             }
-            if shown.is_none() {
-                shown = Some((crop, text));
+        };
+
+        if let Some(ocr) = ocr.as_ref() {
+            // 1) Candidații găsiți rapid (text alb pe panou întunecat). Fără tastă și fără
+            //    prompt pe ecran citim rar (3 pe secundă), ca să nu consumăm degeaba.
+            if !cands.is_empty() && (e.auto_active() || last_ocr.elapsed() >= Duration::from_millis(330)) {
+                last_ocr = Instant::now();
+                did_ocr = true;
+                for (i, c) in cands.iter().take(4).enumerate() {
+                    let crop = prompt::ocr_crop(&img, c.b);
+                    let words = read(ocr, &crop, &mut ocr_errors);
+                    let text = words.iter().map(|w| w.0.as_str()).collect::<Vec<_>>().join(" ");
+                    diag[i].ocr = true;
+                    diag[i].text = text.clone();
+                    if let Some(word) = prompt::match_words(&text, &cfg.words) {
+                        let gold = prompt::gold_fraction(&img, c.b);
+                        diag[i].matched = true;
+                        diag[i].gold = gold;
+                        hit = Some((word, gold));
+                        shown = Some((crop, text));
+                        break;
+                    }
+                    if shown.is_none() {
+                        shown = Some((crop, text));
+                    }
+                }
             }
-        }
-        if ocr_errors == 0 && e.live.lock().ocr != "ready" {
-            set_ocr(&e, "ready", "");
+            // 2) Plasa de siguranță: ai apăsat tasta și nu am găsit promptul. Citim direct
+            //    o zonă mare din jurul centrului ecranului.
+            if hit.is_none() && key_recent && last_fallback.elapsed() >= Duration::from_millis(300) {
+                last_fallback = Instant::now();
+                did_ocr = true;
+                let area = prompt::center_area(&img);
+                let (oimg, scale) = prompt::ocr_area(&img, area);
+                let words = read(ocr, &oimg, &mut ocr_errors);
+                fallback_text = words.iter().map(|w| w.0.as_str()).collect::<Vec<_>>().join(" ");
+                for (text, r) in &words {
+                    if let Some(word) = prompt::match_words(text, &cfg.words) {
+                        let b = prompt::BoxI {
+                            x: area.x + (r.X / scale) as i32,
+                            y: area.y + (r.Y / scale) as i32,
+                            w: ((r.Width / scale) as i32).max(1),
+                            h: ((r.Height / scale) as i32).max(1),
+                        };
+                        let gold = prompt::gold_fraction(&img, b);
+                        let mut d = DiagCand::from_box(b);
+                        d.ocr = true;
+                        d.matched = true;
+                        d.fallback = true;
+                        d.text = text.clone();
+                        d.gold = gold;
+                        diag.push(d);
+                        hit = Some((word, gold));
+                        break;
+                    }
+                }
+                e.diag.lock().fallback_runs += 1;
+            }
+            if ocr_errors == 0 && e.live.lock().ocr != "ready" {
+                set_ocr(&e, "ready", "");
+            }
         }
         if let Some(s) = shown {
             *e.last_ocr.lock() = Some(s);
         }
+        {
+            let mut d = e.diag.lock();
+            d.region_w = img.w;
+            d.region_h = img.h;
+            d.cands = diag;
+            d.find_ms = find_ms;
+            d.frames += 1;
+            if did_ocr {
+                d.ocr_runs += 1;
+                d.ocr_ms = t0.elapsed().as_secs_f32() * 1000.0 - find_ms;
+            }
+            if !fallback_text.is_empty() {
+                d.fallback_text = fallback_text;
+            }
+        }
+        *e.diag_frame.lock() = Some(img.clone());
         match hit {
             Some((word, gold)) => e.on_prompt_obs(true, &word, gold),
-            None => e.on_prompt_obs(false, "", 0.0),
+            // Un cadru fără citire nu înseamnă „promptul a dispărut” cât timp ții tasta
+            // (plasa de siguranță citește doar o dată la 300 ms).
+            None if did_ocr || (cands.is_empty() && !key_recent) => e.on_prompt_obs(false, "", 0.0),
+            None => {}
         }
         report_ms(&e, t0);
     }
@@ -749,5 +836,36 @@ mod tests {
             eprintln!("OCR {name}: {texts:?}");
             assert!(found, "OCR nu a găsit SEARCH la {name}: {texts:?}");
         }
+
+        // Plasa de siguranță: OCR direct pe zona din jurul centrului unui cadru întreg din joc.
+        let full = load_png(include_bytes!("../../tests/fixtures/frame_full.png"));
+        let (x0, y0, x1, y1) = prompt::SEARCH_REGION.pixels(full.w as u32, full.h as u32);
+        let (x0, y0, x1, y1) = (x0 as usize, y0 as usize, x1 as usize, y1 as usize);
+        let mut region = prompt::Rgb { w: x1 - x0, h: y1 - y0, px: Vec::new() };
+        for y in y0..y1 {
+            region.px.extend_from_slice(&full.px[(y * full.w + x0) * 3..(y * full.w + x1) * 3]);
+        }
+        let area = prompt::center_area(&region);
+        let (oimg, scale) = prompt::ocr_area(&region, area);
+        let t0 = Instant::now();
+        let words = ocr.read_words(&oimg).expect("OCR zonă");
+        let ms = t0.elapsed().as_secs_f32() * 1000.0;
+        let texts: Vec<&str> = words.iter().map(|w| w.0.as_str()).collect();
+        eprintln!("OCR zonă centrală {}×{} (×{scale:.2}, {ms:.0} ms): {texts:?}", oimg.w, oimg.h);
+        let hit = words.iter().find(|w| prompt::match_words(&w.0, &words_kw()).is_some());
+        let (_, r) = hit.unwrap_or_else(|| panic!("plasa de siguranță nu a găsit SEARCH: {texts:?}"));
+        let b = prompt::BoxI {
+            x: area.x + (r.X / scale) as i32,
+            y: area.y + (r.Y / scale) as i32,
+            w: (r.Width / scale) as i32,
+            h: (r.Height / scale) as i32,
+        };
+        let gold = prompt::gold_fraction(&region, b);
+        eprintln!("plasa de siguranță: cutie {b:?}, auriu {:.0}%", gold * 100.0);
+        assert!(gold >= prompt::GOLD_MIN, "auriu {gold}");
+    }
+
+    fn words_kw() -> Vec<String> {
+        prompt::parse_words("SEARCH")
     }
 }

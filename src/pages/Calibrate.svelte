@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app } from "../lib/state.svelte";
-  import { api, type Roi } from "../lib/api";
+  import { api, type AutoDiag, type Roi } from "../lib/api";
   import Icon from "../lib/Icon.svelte";
   import Meter from "../lib/Meter.svelte";
   import RoiPicker from "../lib/RoiPicker.svelte";
@@ -12,6 +12,67 @@
   const listening = $derived(live?.audio === "listening");
   const auto = $derived(s.settings.visual_method === "auto");
   const ocrBad = $derived(live?.ocr === "missing" || live?.ocr === "error");
+  // ── Diagnosticul detectorului automat: ce vede aplicația, live ──
+  let diagCanvas = $state<HTMLCanvasElement>();
+  let diag = $state<AutoDiag | null>(null);
+  let hasDiagImg = $state(false);
+  $effect(() => {
+    if (!auto) return;
+    let alive = true;
+    (async () => {
+      while (alive) {
+        try {
+          const [d, img] = await Promise.all([api.autoDiag(), api.autoDiagImage()]);
+          diag = d;
+          drawDiag(img, d);
+        } catch { /* fără diagnostic încă */ }
+        await new Promise((r) => setTimeout(r, 450));
+      }
+    })();
+    return () => (alive = false);
+  });
+  function drawDiag(buf: ArrayBuffer, d: AutoDiag) {
+    const c = diagCanvas;
+    const dv = new DataView(buf);
+    const w = dv.getUint32(0, true), h = dv.getUint32(4, true);
+    hasDiagImg = w > 0 && h > 0;
+    if (!c || !hasDiagImg) return;
+    c.width = w; c.height = h;
+    const g = c.getContext("2d")!;
+    g.putImageData(new ImageData(new Uint8ClampedArray(buf, 8, w * h * 4), w, h), 0, 0);
+    const k = w / Math.max(1, d.diag.region_w);
+    g.lineWidth = 2;
+    g.font = "bold 12px Fredoka, sans-serif";
+    for (const cd of d.diag.cands) {
+      const color = cd.matched ? (cd.fallback ? "#5bc0ff" : "#7ed957") : cd.ocr ? "#ffc534" : "rgba(255,255,255,0.55)";
+      const pad = 3;
+      g.strokeStyle = color;
+      g.strokeRect(cd.x * k - pad, cd.y * k - pad, cd.w * k + pad * 2, cd.h * k + pad * 2);
+      if (cd.ocr) {
+        const label = (cd.text || "(nimic)").slice(0, 28) + (cd.matched ? ` · auriu ${Math.round(cd.gold * 100)}%` : "");
+        const tw = g.measureText(label).width;
+        const lx = Math.min(cd.x * k - pad, w - tw - 8), ly = Math.max(14, cd.y * k - pad - 4);
+        g.fillStyle = "rgba(20,12,8,0.85)";
+        g.fillRect(lx, ly - 12, tw + 8, 15);
+        g.fillStyle = color;
+        g.fillText(label, lx + 4, ly);
+      }
+    }
+  }
+  let savingDiag = $state(false);
+  async function saveDiag() {
+    savingDiag = true;
+    try {
+      const dir = await api.saveDiagnostic();
+      app.toast("ok", `Diagnostic salvat în ${dir}. Trimite-mi imaginea și fișierul .json.`);
+    } catch (e) {
+      app.toast("err", String(e));
+    } finally {
+      savingDiag = false;
+    }
+  }
+  const keyAgo = $derived(diag?.key_ms_ago);
+
   async function setMethod(m: "auto" | "template") {
     await app.saveSettings({ visual_method: m });
     await app.reload();
@@ -135,14 +196,32 @@
 <div class="grid">
   {#if auto}
   <!-- Detectorul automat -->
-  <section class="card step">
+  <section class="card step wide">
     <div class="sh"><span class="n">1</span><h3>Promptul cufărului</h3>
       {#if live?.ocr === "ready"}<span class="ok" in:scale><Icon name="check" size={14} /> Automat</span>{/if}
     </div>
     <p>Nu trebuie probe. Caut promptul <b>E · SEARCH</b> oriunde apare lângă cufăr și îl citesc cu recunoașterea de text din Windows. Număr doar dacă lângă prompt e un <b>cufăr auriu</b>, nu o ladă de muniție.</p>
     {#if ocrBad}<p class="warn"><Icon name="info" size={15} /> {live?.ocr_error}</p>{/if}
     {#if !capturing}<p class="warn"><Icon name="info" size={15} /> {live?.capture === "unsupported" ? "Captura merge doar pe Windows." : "Pornește Fortnite ca să văd promptul."}</p>{/if}
-    <figure class="ocrfig"><canvas class="ocr" bind:this={cur}></canvas>{#if !hasCur}<span class="pe">Apropie-te de un cufăr</span>{/if}<figcaption>Ultimul text alb găsit pe un panou întunecat</figcaption></figure>
+    <div class="diagwrap">
+      <figure class="diagfig">
+        <canvas class="diag" bind:this={diagCanvas}></canvas>
+        {#if !hasDiagImg}<span class="pe">{capturing ? "Aștept primul cadru…" : "Nu văd jocul încă"}</span>{/if}
+        <figcaption>Ce vede aplicația (zona din centrul ecranului). <b class="lg g">verde</b> = SEARCH găsit · <b class="lg b">albastru</b> = găsit la apăsarea tastei · <b class="lg y">galben</b> = citit, alt text · <b class="lg w">alb</b> = necitit</figcaption>
+      </figure>
+      <div class="diagside">
+        <div class="kv"><span>Captură</span><b class:bad={!capturing}>{capturing ? `${live?.capture_target || "Fortnite"} · ${live?.frame_w}×${live?.frame_h} · ${live?.fps.toFixed(0)}/s` : live?.capture_error || "nu văd jocul"}</b></div>
+        <div class="kv"><span>OCR Windows</span><b class:bad={ocrBad || live?.ocr === "off"}>{live?.ocr === "ready" ? `pornit (${diag?.diag.ocr_lang || "?"})` : live?.ocr === "off" ? "nepornit" : "lipsește"}</b></div>
+        <div class="kv"><span>Tasta {s.settings.interact_label}</span><b>{live?.key_down ? "apăsată acum" : keyAgo != null && keyAgo < 60000 ? `acum ${(keyAgo / 1000).toFixed(1)} s` : "neapăsată"}</b></div>
+        <div class="kv"><span>Candidați / citiri</span><b>{diag ? `${diag.diag.cands.length} · ${diag.diag.ocr_runs} citiri · ${diag.diag.find_ms.toFixed(0)}+${diag.diag.ocr_ms.toFixed(0)} ms` : "—"}</b></div>
+        <div class="kv col"><span>La apăsarea tastei am citit</span><b class="mono">{diag?.diag.fallback_text || "—"}</b></div>
+        <div class="btns">
+          <button class="btn small orange" disabled={savingDiag} onclick={saveDiag}><Icon name="camera" size={15} /> Salvează diagnostic ({s.settings.hotkey_diag || "F5"})</button>
+          <button class="btn small dark" onclick={() => api.openDiagnostics()}>Deschide folderul</button>
+        </div>
+        <p class="hintsm">Nu vede cufărul? Stai în fața lui cu promptul pe ecran și apasă <b>{s.settings.hotkey_diag || "F5"}</b> din joc. Trimite-mi apoi imaginea și fișierul din folder.</p>
+      </div>
+    </div>
     <div class="facts">
       <span class="sg" class:lit={!!live?.prompt_text}><Icon name="eye" size={16} /> {live?.prompt_text ? `Citesc: ${live.prompt_text}` : "Nu văd promptul"}</span>
       <span class="sg" class:lit={!!live?.prompt_text && (live?.gold ?? 0) >= 0.06}><Icon name="chest" size={16} /> Auriu lângă prompt: {Math.round((live?.gold ?? 0) * 100)}%</span>
@@ -255,7 +334,21 @@
   .seg button:hover { background: var(--card2); }
   .seg button.on { background: var(--gold); color: var(--ink); box-shadow: inset 0 -3px 0 var(--gold3); }
   .method { margin-top: 14px; max-width: 460px; }
-  .ocrfig canvas.ocr { aspect-ratio: auto; height: 96px; width: 100%; object-fit: contain; background: #f4ede4; }
+  .wide { grid-column: 1 / -1; }
+  .diagwrap { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .diagfig canvas.diag { aspect-ratio: auto; width: 100%; height: auto; min-height: 160px; background: #0d0806; }
+  .diagfig figcaption { text-align: left; line-height: 1.5; }
+  .lg { font-weight: 700; }
+  .lg.g { color: #7ed957; } .lg.b { color: #5bc0ff; } .lg.y { color: #ffc534; } .lg.w { color: #e9dccd; }
+  .diagside { display: flex; flex-direction: column; gap: 8px; }
+  .kv { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 6px 10px; border-radius: 10px; background: rgba(56, 36, 23, 0.55); }
+  .kv span { color: var(--dim); }
+  .kv b { color: var(--text); text-align: right; }
+  .kv b.bad { color: #ff7a5c; }
+  .kv.col { flex-direction: column; gap: 3px; }
+  .kv.col b { text-align: left; }
+  .mono { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-word; }
+  .hintsm { font-size: 12px !important; color: var(--dim) !important; }
   .facts { display: flex; flex-wrap: wrap; gap: 8px; }
   .testbox { display: flex; align-items: center; gap: 22px; padding: 14px 16px; border-radius: 14px; background: rgba(56, 36, 23, 0.55); }
   .tv { font-size: 46px; color: var(--gold); line-height: 1; }

@@ -417,7 +417,7 @@ mod tests {
     #[test]
     fn needs_two_similar_samples() {
         let a = vec![0.1f32; TPL_FRAMES * BANDS];
-        assert!(build_audio_template(&[a.clone()]).is_err());
+        assert!(build_audio_template(std::slice::from_ref(&a)).is_err());
         let mut r = Rng(7);
         let b: Vec<f32> = (0..TPL_FRAMES * BANDS).map(|_| r.f()).collect();
         let c: Vec<f32> = (0..TPL_FRAMES * BANDS).map(|_| r.f()).collect();

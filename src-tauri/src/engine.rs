@@ -74,6 +74,45 @@ pub struct Live {
     pub gold: f32,
 }
 
+/// Un candidat văzut de detectorul automat (pentru diagnostic), în pixelii zonei de căutare.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct DiagCand {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    /// A fost citit cu OCR.
+    pub ocr: bool,
+    pub text: String,
+    /// Textul citit conține cuvântul promptului.
+    pub matched: bool,
+    pub gold: f32,
+    /// Găsit de plasa de siguranță (OCR pe zona centrală), nu de căutarea rapidă.
+    pub fallback: bool,
+}
+
+impl DiagCand {
+    pub fn from_box(b: prompt::BoxI) -> Self {
+        Self { x: b.x, y: b.y, w: b.w, h: b.h, ..Default::default() }
+    }
+}
+
+/// Ce a văzut detectorul automat la ultimul cadru (pentru pagina de diagnostic și F5).
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct AutoDiag {
+    pub region_w: usize,
+    pub region_h: usize,
+    pub cands: Vec<DiagCand>,
+    pub ocr_lang: String,
+    pub find_ms: f32,
+    pub ocr_ms: f32,
+    pub frames: u64,
+    pub ocr_runs: u64,
+    pub fallback_runs: u64,
+    /// Ce a citit ultima dată plasa de siguranță.
+    pub fallback_text: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct ChestPayload {
     pub total: i64,
@@ -127,6 +166,9 @@ pub struct Engine {
     pub auto_cv: Condvar,
     /// Ultimul decupaj dat la OCR și ce a citit (pentru previzualizare).
     pub last_ocr: Mutex<Option<(OcrImage, String)>>,
+    pub diag: Mutex<AutoDiag>,
+    /// Ultimul cadru analizat de detectorul automat (zona de căutare).
+    pub diag_frame: Mutex<Option<Arc<Rgb>>>,
     start: Instant,
 }
 
@@ -182,6 +224,8 @@ impl Engine {
             auto_frame: Mutex::new(None),
             auto_cv: Condvar::new(),
             last_ocr: Mutex::new(None),
+            diag: Mutex::new(AutoDiag::default()),
+            diag_frame: Mutex::new(None),
             start: Instant::now(),
             store: Mutex::new(store),
         })
@@ -239,6 +283,79 @@ impl Engine {
         if opened {
             self.signal(Source::Visual);
         }
+    }
+
+    /// Starea completă a detecției (pentru diagnostic): setări, stare live, ce s-a văzut.
+    pub fn diag_json(&self) -> serde_json::Value {
+        let live = self.live.lock().clone();
+        let diag = self.diag.lock().clone();
+        let s = self.store.lock().settings.clone();
+        let now = self.mono_ms();
+        serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "live": live,
+            "diag": diag,
+            "key_ms_ago": self.last_key().map(|k| now.saturating_sub(k)),
+            "settings": {
+                "visual_method": s.visual_method,
+                "visual_enabled": s.visual_enabled,
+                "chest_only": s.chest_only,
+                "search_words": s.search_words,
+                "require_key": s.require_key,
+                "interact_label": s.interact_label,
+                "interact_vk": s.interact_vk,
+                "capture_source": s.capture_source,
+                "mode": s.mode,
+                "fps": s.fps,
+            },
+        })
+    }
+
+    /// Salvează diagnosticul (imaginea zonei de căutare + starea) în folderul aplicației.
+    /// Întoarce folderul.
+    pub fn save_diagnostic(&self) -> Result<std::path::PathBuf, String> {
+        let dir = self.store.lock().dir().join("diagnostic");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let stamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+        let frame = self.diag_frame.lock().clone();
+        if let Some(img) = &frame {
+            let path = dir.join(format!("diagnostic_{stamp}.png"));
+            let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+            let mut enc = png::Encoder::new(std::io::BufWriter::new(file), img.w as u32, img.h as u32);
+            enc.set_color(png::ColorType::Rgb);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut wr = enc.write_header().map_err(|e| e.to_string())?;
+            wr.write_image_data(&img.px).map_err(|e| e.to_string())?;
+        }
+        let mut json = self.diag_json();
+        json["has_image"] = serde_json::json!(frame.is_some());
+        let text = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+        std::fs::write(dir.join(format!("diagnostic_{stamp}.json")), text).map_err(|e| e.to_string())?;
+        Ok(dir)
+    }
+
+    /// Previzualizarea zonei de căutare (RGBA, micșorată la cel mult `max_w`), pentru diagnostic.
+    pub fn diag_image(&self, max_w: usize) -> Vec<u8> {
+        let frame = self.diag_frame.lock().clone();
+        let mut out = Vec::new();
+        let Some(img) = frame else {
+            out.extend_from_slice(&[0u8; 8]);
+            return out;
+        };
+        let ow = img.w.min(max_w).max(1);
+        let oh = (img.h * ow / img.w.max(1)).max(1);
+        out.extend_from_slice(&(ow as u32).to_le_bytes());
+        out.extend_from_slice(&(oh as u32).to_le_bytes());
+        out.reserve(ow * oh * 4);
+        for oy in 0..oh {
+            let sy = oy * img.h / oh;
+            for ox in 0..ow {
+                let sx = ox * img.w / ow;
+                let i = (sy * img.w + sx) * 3;
+                out.extend_from_slice(&[img.px[i], img.px[i + 1], img.px[i + 2], 255]);
+            }
+        }
+        out
     }
 
     /// Un semnal de la un detector.
