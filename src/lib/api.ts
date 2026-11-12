@@ -106,8 +106,20 @@ export async function listen<T>(event: string, cb: (payload: T) => void): Promis
   return listen<T>(event, (e) => cb(e.payload));
 }
 
+// La pornire, motorul din Rust poate fi gata cu câteva milisecunde după interfață.
+async function snapshotWithRetry(): Promise<Snapshot> {
+  for (let i = 0; ; i++) {
+    try {
+      return await tauriInvoke<Snapshot>("get_snapshot");
+    } catch (e) {
+      if (i >= 40 || !String(e).includes("state not managed")) throw e;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+}
+
 export const api = {
-  snapshot: () => (isTauri ? tauriInvoke<Snapshot>("get_snapshot") : mock.snapshot()),
+  snapshot: () => (isTauri ? snapshotWithRetry() : mock.snapshot()),
   addManual: (delta: number) => (isTauri ? tauriInvoke<boolean>("add_manual", { delta }) : mock.add(delta, "manual")),
   newSession: () => (isTauri ? tauriInvoke<void>("new_session") : mock.newSession()),
   resetAll: () => (isTauri ? tauriInvoke<void>("reset_all") : mock.resetAll()),

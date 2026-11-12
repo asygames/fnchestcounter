@@ -444,6 +444,9 @@ pub(crate) mod tests {
     pub(crate) const SHOT: &[u8] = include_bytes!("../../tests/fixtures/chest_search.png");
     /// Cutia cuvântului „SEARCH” în captură (măsurată de mână).
     const WORD: BoxI = BoxI { x: 259, y: 207, w: 53, h: 9 };
+    /// A doua captură reală: cufăr lângă un perete galben, 518×480.
+    pub(crate) const SHOT2: &[u8] = include_bytes!("../../tests/fixtures/chest_search2.png");
+    const WORD2: BoxI = BoxI { x: 355, y: 244, w: 52, h: 10 };
 
     pub(crate) fn load_png(bytes: &[u8]) -> Rgb {
         let dec = png::Decoder::new(std::io::Cursor::new(bytes));
@@ -514,10 +517,16 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn finds_search_word_in_real_screenshot() {
-        let shot = load_png(SHOT);
-        let c = find_candidates(&shot);
-        assert!(c.iter().any(|c| overlaps(c.b, WORD) && (c.b.h - WORD.h).abs() <= 3), "candidați: {c:?}");
+    fn finds_search_word_in_real_screenshots() {
+        for (shot, word) in [(SHOT, WORD), (SHOT2, WORD2)] {
+            let shot = load_png(shot);
+            let c = find_candidates(&shot);
+            let hit = c.iter().find(|c| overlaps(c.b, word) && (c.b.h - word.h).abs() <= 3);
+            let hit = hit.unwrap_or_else(|| panic!("candidați: {c:?}"));
+            let gold = gold_fraction(&shot, hit.b);
+            eprintln!("{}×{}: cutie {:?}, auriu {:.0}%", shot.w, shot.h, hit.b, gold * 100.0);
+            assert!(gold >= GOLD_MIN * 2.0, "auriu {gold}");
+        }
     }
 
     #[test]

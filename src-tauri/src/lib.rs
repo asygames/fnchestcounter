@@ -44,6 +44,13 @@ pub fn run() {
             let engine = Engine::new(handle.clone(), store);
             app.manage(engine.clone());
 
+            // Ferestrele se creează abia acum, după ce motorul e înregistrat. Dacă le-ar crea
+            // Tauri singur (înainte de setup), interfața ar putea cere datele prea devreme și ar
+            // primi „state not managed for field `engine`”.
+            for conf in app.config().app.windows.clone() {
+                tauri::WebviewWindowBuilder::from_config(&handle, &conf)?.build()?;
+            }
+
             tray::build(&handle)?;
             tray::update_tooltip(&handle, session, today);
             commands::register_hotkeys(&handle, &settings);

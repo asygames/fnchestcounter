@@ -712,7 +712,7 @@ fn key_loop(e: Arc<Engine>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::detect::prompt::tests::{load_png, scaled, SHOT};
+    use crate::detect::prompt::tests::{load_png, scaled, SHOT, SHOT2};
 
     /// Rulează în CI pe Windows: OCR-ul real din Windows trebuie să citească „SEARCH”
     /// din captura reală a promptului de cufăr.
@@ -732,7 +732,8 @@ mod tests {
         eprintln!("OCR: limba {}", ocr.lang);
         let words = prompt::parse_words("SEARCH");
         let shot = load_png(SHOT);
-        for (name, img) in [("1x", shot.clone()), ("2x", scaled(&shot, 2.0))] {
+        let shot2 = load_png(SHOT2);
+        for (name, img) in [("1x", shot.clone()), ("2x", scaled(&shot, 2.0)), ("perete galben", shot2)] {
             let cands = prompt::find_candidates(&img);
             let mut texts = Vec::new();
             let mut found = false;
