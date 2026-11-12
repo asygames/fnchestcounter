@@ -1,0 +1,72 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "FN Chest Counter",
+  "version": "0.1.0",
+  "identifier": "com.asygames.fnchestcounter",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "FN Chest Counter",
+        "url": "index.html",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 940,
+        "minHeight": 620,
+        "center": true,
+        "decorations": false,
+        "transparent": false,
+        "resizable": true,
+        "backgroundColor": "#140d0b"
+      },
+      {
+        "label": "overlay",
+        "title": "FN Chest Counter Overlay",
+        "url": "overlay.html",
+        "width": 250,
+        "height": 96,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false,
+        "focus": false,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "shortDescription": "Numără cuferele deschise în Fortnite",
+    "longDescription": "Numără automat cuferele deschise în Fortnite, citind doar imaginea și sunetul de pe ecran (ca OBS), fără să atingă jocul.",
+    "publisher": "asygames",
+    "copyright": "© asygames",
+    "category": "Utility",
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Romanian", "English"],
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

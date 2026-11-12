@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff9a2e"/>
+      <stop offset="1" stop-color="#e2461c"/>
+    </linearGradient>
+    <radialGradient id="shine" cx="0.5" cy="0.32" r="0.6">
+      <stop offset="0" stop-color="#ffd977" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#ffd977" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c8742f"/>
+      <stop offset="1" stop-color="#8a4318"/>
+    </linearGradient>
+    <linearGradient id="lid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#dc8a3e"/>
+      <stop offset="1" stop-color="#a5541f"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff0a0"/>
+      <stop offset="0.45" stop-color="#ffc534"/>
+      <stop offset="1" stop-color="#e08a0c"/>
+    </linearGradient>
+    <clipPath id="chest">
+      <path d="M90 250 V196 C90 126 154 92 256 92 C358 92 422 126 422 196 V250 Z"/>
+      <rect x="84" y="234" width="344" height="188" rx="22"/>
+    </clipPath>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#shine)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="none" stroke="#2a1208" stroke-width="16"/>
+  <g stroke="#2a1208" stroke-width="16" stroke-linejoin="round">
+    <!-- corp -->
+    <rect x="96" y="246" width="320" height="176" rx="22" fill="url(#wood)"/>
+    <path d="M104 304 H408 M104 362 H408" stroke="#6b3112" stroke-width="8" fill="none"/>
+    <!-- capac -->
+    <path d="M90 250 V196 C90 126 154 92 256 92 C358 92 422 126 422 196 V250 Z" fill="url(#lid)"/>
+    <path d="M150 112 C142 140 140 196 142 250 M362 112 C370 140 372 196 370 250" stroke="#6b3112" stroke-width="8" fill="none"/>
+    <!-- benzi aurii (decupate după forma cufărului) -->
+    <g clip-path="url(#chest)">
+      <rect x="132" y="60" width="44" height="370" fill="url(#gold)"/>
+      <rect x="336" y="60" width="44" height="370" fill="url(#gold)"/>
+    </g>
+    <path d="M90 250 V196 C90 126 154 92 256 92 C358 92 422 126 422 196 V250" fill="none"/>
+    <rect x="96" y="246" width="320" height="176" rx="22" fill="none"/>
+    <rect x="84" y="234" width="344" height="36" rx="12" fill="url(#gold)"/>
+    <!-- lacăt -->
+    <rect x="212" y="222" width="88" height="100" rx="20" fill="url(#gold)"/>
+    <path d="M256 252 a14 14 0 0 1 9 25 l5 22 h-28 l5 -22 a14 14 0 0 1 9 -25 z" fill="#2a1208" stroke="none"/>
+  </g>
+  <!-- luciri -->
+  <path d="M164 150 q6 -16 22 -18" stroke="#fff6c8" stroke-width="10" stroke-linecap="round" fill="none"/>
+  <path d="M232 238 q4 -8 14 -10" stroke="#fffbe0" stroke-width="7" stroke-linecap="round" fill="none"/>
+  <!-- scântei -->
+  <g fill="#fffbe6" stroke="#2a1208" stroke-width="7" stroke-linejoin="round">
+    <path d="M430 74 l12 30 30 12 -30 12 -12 30 -12 -30 -30 -12 30 -12 z"/>
+    <path d="M70 92 l8 19 19 8 -19 8 -8 19 -8 -19 -19 -8 19 -8 z"/>
+  </g>
+</svg>

@@ -1,0 +1,176 @@
+@import "@fontsource-variable/fredoka";
+@import "@fontsource-variable/inter";
+
+:root {
+  --bg: #140d0b;
+  --bg2: #1b120e;
+  --card: #231610;
+  --card2: #2c1c13;
+  --card3: #382417;
+  --line: #43291a;
+  --line2: #5a3820;
+  --text: #fff4e4;
+  --muted: #d3b08e;
+  --dim: #8f6c53;
+  --gold: #ffc534;
+  --gold2: #ffe17a;
+  --gold3: #e08a0c;
+  --orange: #ff8a1f;
+  --red: #ff5139;
+  --green: #86de52;
+  --pink: #ff6f8e;
+  --ink: #2a1208;
+  --radius: 18px;
+  --display: "Fredoka Variable", "Fredoka", system-ui, sans-serif;
+  --body: "Inter Variable", "Inter", system-ui, sans-serif;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  overflow: hidden;
+}
+
+#app { height: 100%; }
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+h1, h2, h3 { font-family: var(--display); margin: 0; font-weight: 600; letter-spacing: 0.2px; }
+
+.card {
+  background: linear-gradient(180deg, var(--card2), var(--card));
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 0 #0c0705, inset 0 1px 0 rgba(255, 220, 170, 0.06);
+}
+
+.label {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Buton 3D cartoon: față colorată + „grosime” dedesubt, se apasă la click. */
+.btn {
+  --c1: var(--gold2);
+  --c2: var(--gold);
+  --c3: var(--gold3);
+  --tc: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 20px;
+  border-radius: 14px;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--tc);
+  background: linear-gradient(180deg, var(--c1), var(--c2));
+  border: 2.5px solid var(--ink);
+  box-shadow: 0 5px 0 var(--ink), inset 0 2px 0 rgba(255, 255, 255, 0.45), inset 0 -3px 0 var(--c3);
+  transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.15s;
+  white-space: nowrap;
+}
+.btn:hover { filter: brightness(1.06); }
+.btn:active { transform: translateY(4px); box-shadow: 0 1px 0 var(--ink), inset 0 2px 0 rgba(255, 255, 255, 0.45), inset 0 -3px 0 var(--c3); }
+.btn:disabled { filter: grayscale(0.7) brightness(0.7); cursor: default; }
+.btn.orange { --c1: #ffb15c; --c2: var(--orange); --c3: #c85a06; --tc: #fff; text-shadow: 0 2px 0 rgba(42, 18, 8, 0.55); }
+.btn.red { --c1: #ff8a72; --c2: var(--red); --c3: #b5240f; --tc: #fff; text-shadow: 0 2px 0 rgba(42, 18, 8, 0.55); }
+.btn.green { --c1: #b5f27e; --c2: var(--green); --c3: #4e9d22; }
+.btn.dark { --c1: #4a3020; --c2: #3a2417; --c3: #26170e; --tc: var(--text); }
+.btn.small { height: 34px; padding: 0 14px; font-size: 14px; border-radius: 11px; box-shadow: 0 4px 0 var(--ink), inset 0 2px 0 rgba(255,255,255,0.35), inset 0 -2px 0 var(--c3); }
+.btn.small:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--ink); }
+.btn.icon { width: 44px; padding: 0; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--card3);
+  border: 1.5px solid var(--line2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
+.dot.on { background: var(--green); box-shadow: 0 0 0 3px rgba(134, 222, 82, 0.2); }
+.dot.warn { background: var(--gold); box-shadow: 0 0 0 3px rgba(255, 197, 52, 0.2); }
+.dot.err { background: var(--red); box-shadow: 0 0 0 3px rgba(255, 81, 57, 0.2); }
+
+.num {
+  font-family: var(--display);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Text auriu cu contur gros închis (pentru cifrele mari). */
+.gold-text {
+  color: var(--gold);
+  background: linear-gradient(180deg, #fff3b0 10%, var(--gold) 55%, #f39a12 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: 0;
+  paint-order: stroke fill;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 10px; border: 2px solid var(--bg2); }
+::-webkit-scrollbar-track { background: transparent; }
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 24px;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 14px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--gold) var(--p, 50%), #120a07 var(--p, 50%));
+  border: 2px solid #0d0705;
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.18);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 24px;
+  height: 24px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #fff3c4, var(--gold));
+  border: 2.5px solid var(--ink);
+  box-shadow: 0 3px 0 var(--ink);
+}
+input[type="range"]:disabled { cursor: default; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
