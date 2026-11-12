@@ -48,7 +48,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -61,11 +63,28 @@
     "copyright": "© asygames",
     "category": "Utility",
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["Romanian", "English"],
+        "languages": [
+          "Romanian",
+          "English"
+        ],
         "displayLanguageSelector": false
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQwOTY3QUMwREZGN0FGNzgKUldSNHIvZmZ3SHFXMEdtZDY1SEpFamJVQzVzR0h1eUY0SjNleEZseTliSXdHV0lsSHJBMFU5QTcK",
+      "endpoints": [
+        "https://github.com/asygames/fnchestcounter/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

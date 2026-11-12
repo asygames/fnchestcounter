@@ -1,5 +1,9 @@
 name: Build Windows
 
+# - push pe main / PR: verificări + build, fișierele apar la „Artifacts”.
+# - tag v* (ex. v0.1.1): build semnat + Release public cu latest.json,
+#   de unde aplicațiile instalate își iau singure actualizarea.
+
 on:
   push:
     branches: [main]
@@ -17,6 +21,9 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v7
 
@@ -46,10 +53,47 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy --lib -- -D warnings
 
+      - name: Verifică versiunea tag-ului
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          if ("v$($conf.version)" -ne "${{ github.ref_name }}") {
+            throw "Tag-ul ${{ github.ref_name }} nu se potrivește cu versiunea din tauri.conf.json ($($conf.version))."
+          }
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "Lipsește secretul TAURI_SIGNING_PRIVATE_KEY: release-ul nu ar putea fi actualizat automat." }
+
+      # ── Release (tag v*) ──
+      - name: Build + Release public
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: tauri-apps/tauri-action@v1
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: FN Chest Counter ${{ github.ref_name }}
+          releaseBody: |
+            Descarcă `FN.Chest.Counter_*_x64-setup.exe` și rulează-l.
+            Dacă ai deja aplicația, se actualizează singură (Setări → Actualizări → Verifică acum).
+          releaseDraft: false
+          prerelease: false
+          tauriScript: npm run tauri --
+
+      # ── Build obișnuit (main / PR) ──
       - name: Build installer
-        run: npm run tauri -- build
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        shell: pwsh
+        run: |
+          if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+            npm run tauri -- build
+          } else {
+            Write-Host "Fără cheie de semnare: construiesc fără fișierele de actualizare."
+            $cfg = Join-Path $env:RUNNER_TEMP "no-updater.json"
+            '{"bundle":{"createUpdaterArtifacts":false}}' | Set-Content -Encoding utf8NoBOM $cfg
+            npm run tauri -- build --config $cfg
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Pregătește fișierele
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force out | Out-Null
@@ -58,14 +102,8 @@ jobs:
           Get-ChildItem out | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v7
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         with:
           name: FNChestCounter-windows
           path: out/*
           if-no-files-found: error
-
-      - name: Release (doar pe tag-uri v*)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v3
-        with:
-          files: out/*
-          draft: true

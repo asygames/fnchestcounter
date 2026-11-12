@@ -28,9 +28,19 @@ Corecții manuale oricând: **F9** (+1) și **F10** (−1). Toate scurtăturile 
 
 > Overlay-ul se vede peste joc doar în modul **Windowed Fullscreen** (sau în fereastră).
 
-## Instalare
+## Instalare și actualizări
 
-Descarcă installer-ul din *Actions → Build Windows → Artifacts* sau din *Releases*. Rulează `FN Chest Counter_x.y.z_x64-setup.exe`; nu cere drepturi de administrator.
+Descarcă `FN.Chest.Counter_x.y.z_x64-setup.exe` din [Releases](https://github.com/asygames/fnchestcounter/releases/latest) și rulează-l. Nu cere drepturi de administrator.
+
+Aplicația se **actualizează singură**. La pornire, și apoi o dată la 6 ore, verifică `latest.json` din ultimul release. Dacă găsește o versiune nouă, arată un banner cu „Actualizează acum”. Update-urile sunt semnate, iar aplicația refuză orice fișier nesemnat cu cheia proiectului. Datele, setările și calibrarea rămân neschimbate.
+
+### Cum public o versiune nouă
+
+1. Crește versiunea în `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` și `package.json` (de exemplu `0.1.1`).
+2. Fă commit, apoi `git tag v0.1.1 && git push origin main v0.1.1`.
+3. GitHub Actions construiește installer-ul semnat și publică release-ul împreună cu `latest.json`. Aplicațiile instalate îl preiau singure.
+
+Semnarea folosește secretele `TAURI_SIGNING_PRIVATE_KEY` și `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` din repo. Cheia privată nu e în repo. **Dacă se pierde, aplicațiile deja instalate nu mai pot primi update-uri.**
 
 Datele se salvează în `%APPDATA%\com.asygames.fnchestcounter\`:
 

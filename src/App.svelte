@@ -9,10 +9,13 @@
   import Stats from "./pages/Stats.svelte";
   import Calibrate from "./pages/Calibrate.svelte";
   import SettingsPage from "./pages/Settings.svelte";
+  import UpdateBanner from "./lib/UpdateBanner.svelte";
+  import { updater } from "./lib/updater.svelte";
 
   let error = $state("");
   onMount(() => {
     app.init().catch((e) => (error = String(e)));
+    updater.start();
     // Doar în modul demo din browser: #stats, #calibrate, #settings, #pulse.
     if (!isTauri && location.hash) {
       const h = location.hash.slice(1);
@@ -79,6 +82,7 @@
   </aside>
 
   <main class="content">
+    <UpdateBanner />
     {#if error}
       <div class="card fatal">Nu am putut porni interfața: {error}</div>
     {:else if app.snap}

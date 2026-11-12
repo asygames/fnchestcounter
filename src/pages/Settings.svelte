@@ -4,6 +4,7 @@
   import { keyToAccelerator, keyToVk, mouseToVk } from "../lib/keys";
   import Icon from "../lib/Icon.svelte";
   import { fade, scale } from "svelte/transition";
+  import { updater } from "../lib/updater.svelte";
 
   const s = $derived(app.snap!.settings);
   const save = (p: Partial<Settings>) => app.saveSettings(p);
@@ -173,6 +174,29 @@
         <code>{app.snap!.data_dir}</code>
       </div>
       <button class="btn small red" onclick={() => (confirmReset = true)}><Icon name="trash" size={15} /> Șterge tot istoricul</button>
+    </section>
+
+    <section class="card sec">
+      <h3><Icon name="refresh" size={18} /> Actualizări</h3>
+      <div class="row">
+        <span>Versiunea instalată</span>
+        <b class="val">v{app.snap!.version}</b>
+      </div>
+      <p class="fh">
+        {#if updater.status === "checking"}Verific…
+        {:else if updater.status === "none"}Ai ultima versiune.
+        {:else if updater.status === "available"}Versiunea v{updater.version} e disponibilă.
+        {:else if updater.status === "downloading" || updater.status === "installing"}Se instalează v{updater.version}…
+        {:else if updater.status === "error"}Nu am putut verifica: {updater.error}
+        {:else}Aplicația verifică singură la pornire și apoi la fiecare 6 ore.{/if}
+      </p>
+      <div class="btns">
+        {#if updater.status === "available"}
+          <button class="btn small green" onclick={() => updater.install()}>Actualizează la v{updater.version}</button>
+        {:else}
+          <button class="btn small" disabled={updater.status === "checking"} onclick={() => updater.check(false)}>Verifică acum</button>
+        {/if}
+      </div>
     </section>
   </div>
 </div>
