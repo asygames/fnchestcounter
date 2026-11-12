@@ -529,6 +529,28 @@ pub(crate) mod tests {
         }
     }
 
+    /// Un cadru întreg din joc (1271×726, cu HUD, kill feed, nume de coechipieri):
+    /// decupăm zona de căutare ca în aplicație, iar promptul trebuie să fie printre
+    /// primii 4 candidați (doar pe ei îi citim cu OCR).
+    #[test]
+    fn finds_prompt_in_real_full_frame() {
+        let full = load_png(include_bytes!("../../tests/fixtures/frame_full.png"));
+        let (x0, y0, x1, y1) = SEARCH_REGION.pixels(full.w as u32, full.h as u32);
+        let (x0, y0, x1, y1) = (x0 as usize, y0 as usize, x1 as usize, y1 as usize);
+        let mut region = Rgb { w: x1 - x0, h: y1 - y0, px: Vec::with_capacity((x1 - x0) * (y1 - y0) * 3) };
+        for y in y0..y1 {
+            region.px.extend_from_slice(&full.px[(y * full.w + x0) * 3..(y * full.w + x1) * 3]);
+        }
+        let want = BoxI { x: 720 - x0 as i32, y: 340 - y0 as i32, w: 52, h: 10 };
+        let c = find_candidates(&region);
+        let pos = c.iter().take(4).position(|c| overlaps(c.b, want));
+        assert!(pos.is_some(), "promptul nu e în primii 4: {c:?}");
+        let b = c[pos.unwrap()].b;
+        let gold = gold_fraction(&region, b);
+        eprintln!("cadru întreg: {} candidați, promptul pe locul {}, auriu {:.0}%", c.len(), pos.unwrap() + 1, gold * 100.0);
+        assert!(gold >= GOLD_MIN * 2.0, "auriu {gold}");
+    }
+
     #[test]
     fn finds_prompt_anywhere_in_a_full_frame() {
         let shot = load_png(SHOT);

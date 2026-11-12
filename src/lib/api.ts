@@ -32,6 +32,7 @@ export interface Settings {
   hotkey_sub: string;
   hotkey_visual_sample: string;
   hotkey_audio_sample: string;
+  hotkey_overlay_move: string;
   reduce_motion: boolean;
   /** „auto” = citesc promptul SEARCH cu OCR, fără calibrare; „template” = probe într-o zonă fixă. */
   visual_method: "auto" | "template";
@@ -203,6 +204,7 @@ const mock = (() => {
       hotkey_sub: "F10",
       hotkey_visual_sample: "F8",
       hotkey_audio_sample: "F7",
+      hotkey_overlay_move: "F6",
       reduce_motion: false,
       visual_method: "auto",
       chest_only: true,

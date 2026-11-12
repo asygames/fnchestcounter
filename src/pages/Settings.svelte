@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app } from "../lib/state.svelte";
-  import { api, type Mode, type Settings } from "../lib/api";
+  import { api, listen, type Mode, type Settings } from "../lib/api";
   import { keyToAccelerator, keyToVk, mouseToVk } from "../lib/keys";
   import Icon from "../lib/Icon.svelte";
   import { fade, scale } from "svelte/transition";
@@ -17,7 +17,7 @@
   ];
 
   // ── Legarea tastelor ──
-  let binding = $state<null | "interact" | "hotkey_add" | "hotkey_sub" | "hotkey_visual_sample" | "hotkey_audio_sample">(null);
+  let binding = $state<null | "interact" | "hotkey_add" | "hotkey_sub" | "hotkey_visual_sample" | "hotkey_audio_sample" | "hotkey_overlay_move">(null);
   function onKey(e: KeyboardEvent) {
     if (!binding) return;
     e.preventDefault();
@@ -39,11 +39,16 @@
 
   // ── Overlay ──
   let editingOverlay = $state(false);
+  // Modul de mutare poate porni și din joc (tasta globală) sau se poate opri din overlay („Gata”).
+  $effect(() => {
+    const un = listen<boolean>("overlay-edit", (e) => (editingOverlay = e));
+    return () => void un.then((u) => u());
+  });
   async function toggleOverlayEdit() {
-    editingOverlay = !editingOverlay;
-    if (editingOverlay && !s.overlay) await save({ overlay: true });
-    await api.overlayEdit(editingOverlay);
-    if (editingOverlay) app.toast("info", "Trage overlay-ul unde vrei pe ecran, apoi apasă Gata.");
+    const next = !editingOverlay;
+    await api.overlayEdit(next);
+    editingOverlay = next;
+    if (next) app.toast("info", "Trage overlay-ul unde vrei pe ecran, apoi apasă Gata.");
   }
 
   // ── Ștergerea datelor ──
@@ -171,13 +176,14 @@
         <button class="btn small" class:green={editingOverlay} onclick={toggleOverlayEdit}><Icon name={editingOverlay ? "check" : "move"} size={16} /> {editingOverlay ? "Gata" : "Mută overlay-ul"}</button>
         <button class="btn small dark" onclick={() => save({ overlay_x: null, overlay_y: null })}>Poziția implicită</button>
       </div>
+      <p class="fh">Din joc: apasă <b>{s.hotkey_overlay_move || "tasta de mutare"}</b>, trage overlay-ul cu mouse-ul (deschide harta sau apasă Esc ca să apară cursorul), apoi apasă din nou <b>{s.hotkey_overlay_move || "tasta"}</b> sau „Gata” pe overlay.</p>
       <p class="fh">Overlay-ul se vede peste joc doar în modul <b>Windowed Fullscreen</b> (sau fereastră). În Fullscreen exclusiv, Windows nu permite nimic deasupra jocului.</p>
     </section>
 
     <section class="card sec">
       <h3><Icon name="bolt" size={18} /> Scurtături globale</h3>
       <p class="fh">Merg și când ești în joc. Click pe tastă, apoi apasă combinația nouă (Backspace o șterge).</p>
-      {#each [["hotkey_add", "Adaugă un cufăr (+1)"], ["hotkey_sub", "Scade un cufăr (−1)"], ["hotkey_visual_sample", "Probă vizuală (calibrare)"], ["hotkey_audio_sample", "Probă de sunet (calibrare)"]] as [k, label]}
+      {#each [["hotkey_add", "Adaugă un cufăr (+1)"], ["hotkey_sub", "Scade un cufăr (−1)"], ["hotkey_visual_sample", "Probă vizuală (calibrare)"], ["hotkey_audio_sample", "Probă de sunet (calibrare)"], ["hotkey_overlay_move", "Mută overlay-ul (și din joc)"]] as [k, label]}
         <div class="row">
           <span>{label}</span>
           <button class="bind" class:listening={binding === k} onclick={() => (binding = binding === k ? null : (k as typeof binding))}>

@@ -120,6 +120,8 @@ pub struct Engine {
     pub audio_score_bits: AtomicU32,
     pub audio_samples: AtomicU32,
     pub shutdown: AtomicBool,
+    /// Overlay-ul e în modul „mută-mă” (primește mouse-ul).
+    pub overlay_editing: AtomicBool,
     /// Ultimul cadru pentru detectorul automat (număr de ordine, imagine).
     pub auto_frame: Mutex<Option<(u64, Arc<Rgb>)>>,
     pub auto_cv: Condvar,
@@ -176,6 +178,7 @@ impl Engine {
             audio_score_bits: AtomicU32::new(0),
             audio_samples: AtomicU32::new(0),
             shutdown: AtomicBool::new(false),
+            overlay_editing: AtomicBool::new(false),
             auto_frame: Mutex::new(None),
             auto_cv: Condvar::new(),
             last_ocr: Mutex::new(None),

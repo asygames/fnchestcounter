@@ -117,7 +117,13 @@ pub fn reset_all(app: AppHandle, engine: Eng) {
 #[tauri::command]
 pub fn update_settings(app: AppHandle, engine: Eng, settings: Settings) -> Result<Settings, String> {
     // Verificăm scurtăturile înainte să salvăm.
-    for hk in [&settings.hotkey_add, &settings.hotkey_sub, &settings.hotkey_visual_sample, &settings.hotkey_audio_sample] {
+    for hk in [
+        &settings.hotkey_add,
+        &settings.hotkey_sub,
+        &settings.hotkey_visual_sample,
+        &settings.hotkey_audio_sample,
+        &settings.hotkey_overlay_move,
+    ] {
         if !hk.is_empty() {
             hk.parse::<Shortcut>().map_err(|e| format!("Scurtătură invalidă „{hk}”: {e}"))?;
         }
@@ -139,7 +145,11 @@ pub fn update_settings(app: AppHandle, engine: Eng, settings: Settings) -> Resul
         prev
     };
     engine.apply_settings(&s, &prev);
-    if prev.overlay != s.overlay || prev.overlay_scale != s.overlay_scale {
+    if prev.overlay != s.overlay
+        || prev.overlay_scale != s.overlay_scale
+        || prev.overlay_x != s.overlay_x
+        || prev.overlay_y != s.overlay_y
+    {
         apply_overlay(&app, &s);
     }
     register_hotkeys(&app, &s);
@@ -215,20 +225,44 @@ pub async fn get_thumbnail(engine: State<'_, Arc<Engine>>) -> Result<Response, S
 
 #[tauri::command]
 pub fn overlay_edit(app: AppHandle, editing: bool) {
-    if let Some(w) = app.get_webview_window("overlay") {
-        if !w.is_visible().unwrap_or(false) {
-            return;
+    set_overlay_edit(&app, editing);
+}
+
+/// Pornește/oprește modul „mută overlay-ul”. Merge din Setări, din butonul „Gata”
+/// de pe overlay și din tasta globală (implicit F6), deci și din joc.
+pub fn set_overlay_edit(app: &AppHandle, editing: bool) {
+    let Some(w) = app.get_webview_window("overlay") else { return };
+    let e = app.state::<Arc<Engine>>();
+    e.overlay_editing.store(editing, Ordering::Relaxed);
+    if editing {
+        // Dacă overlay-ul era ascuns, îl arătăm: altfel nu ai ce muta.
+        let shown = {
+            let mut st = e.store.lock();
+            let was_off = !st.settings.overlay;
+            if was_off {
+                st.settings.overlay = true;
+                st.save_settings();
+            }
+            was_off.then(|| st.settings.clone())
+        };
+        if let Some(s) = shown {
+            apply_overlay(app, &s);
+            let _ = app.emit("settings", &s);
         }
-        let _ = w.set_ignore_cursor_events(!editing);
-        let _ = app.emit_to("overlay", "overlay-edit", editing);
-        if !editing {
-            if let Ok(pos) = w.outer_position() {
-                let e = app.state::<Arc<Engine>>();
+    }
+    let _ = w.set_ignore_cursor_events(!editing);
+    let _ = app.emit("overlay-edit", editing);
+    if !editing {
+        if let Ok(pos) = w.outer_position() {
+            let s = {
                 let mut st = e.store.lock();
                 st.settings.overlay_x = Some(pos.x);
                 st.settings.overlay_y = Some(pos.y);
                 st.save_settings();
-            }
+                st.settings.clone()
+            };
+            // Interfața trebuie să știe noua poziție, altfel o altă setare salvată ar suprascrie-o.
+            let _ = app.emit("settings", &s);
         }
     }
 }
@@ -268,17 +302,27 @@ pub fn apply_overlay(app: &AppHandle, s: &Settings) {
     }
     let scale = s.overlay_scale;
     let _ = w.set_size(tauri::LogicalSize::new(250.0 * scale as f64, 96.0 * scale as f64));
-    match (s.overlay_x, s.overlay_y) {
-        (Some(x), Some(y)) => {
+    // Poziția salvată, dacă încape încă pe un monitor (s-ar fi putut deconecta unul).
+    let saved = match (s.overlay_x, s.overlay_y) {
+        (Some(x), Some(y)) => w.available_monitors().ok().and_then(|ms| {
+            ms.iter()
+                .any(|m| {
+                    let (p, z) = (m.position(), m.size());
+                    x + 40 > p.x && y + 20 > p.y && x < p.x + z.width as i32 - 40 && y < p.y + z.height as i32 - 20
+                })
+                .then_some((x, y))
+        }),
+        _ => None,
+    };
+    match saved {
+        Some((x, y)) => {
             let _ = w.set_position(PhysicalPosition::new(x, y));
         }
-        _ => {
-            // Implicit: sus în dreapta monitorului principal.
+        None => {
+            // Implicit: sus în stânga monitorului principal. În dreapta sus e minimap-ul Fortnite.
             if let Ok(Some(m)) = w.primary_monitor() {
-                let size = m.size();
-                let ws = w.outer_size().map(|s| s.width).unwrap_or(260);
-                let x = m.position().x + size.width as i32 - ws as i32 - (24.0 * m.scale_factor()) as i32;
-                let y = m.position().y + (110.0 * m.scale_factor()) as i32;
+                let x = m.position().x + (24.0 * m.scale_factor()) as i32;
+                let y = m.position().y + (90.0 * m.scale_factor()) as i32;
                 let _ = w.set_position(PhysicalPosition::new(x, y));
             }
         }
@@ -286,17 +330,19 @@ pub fn apply_overlay(app: &AppHandle, s: &Settings) {
     // Întâi afișăm fereastra: pe unele sisteme click-through-ul cere o fereastră deja creată.
     let _ = w.show();
     let _ = w.set_always_on_top(true);
-    let _ = w.set_ignore_cursor_events(true);
+    let editing = app.state::<Arc<Engine>>().overlay_editing.load(Ordering::Relaxed);
+    let _ = w.set_ignore_cursor_events(!editing);
 }
 
 pub fn register_hotkeys(app: &AppHandle, s: &Settings) {
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
-    let bindings: [(&str, &'static str); 4] = [
+    let bindings: [(&str, &'static str); 5] = [
         (&s.hotkey_add, "add"),
         (&s.hotkey_sub, "sub"),
         (&s.hotkey_visual_sample, "visual"),
         (&s.hotkey_audio_sample, "audio"),
+        (&s.hotkey_overlay_move, "overlay_move"),
     ];
     for (key, action) in bindings {
         if key.is_empty() {
@@ -339,6 +385,10 @@ pub fn register_hotkeys(app: &AppHandle, s: &Settings) {
                     }
                 }
                 "audio" => e.audio_cmds.lock().push_back(AudioCmd::TakeSample),
+                "overlay_move" => {
+                    let editing = !e.overlay_editing.load(Ordering::Relaxed);
+                    set_overlay_edit(app, editing);
+                }
                 _ => {}
             }
         });

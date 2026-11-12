@@ -1,7 +1,7 @@
 <script lang="ts">
   // Overlay-ul mic de peste joc: cufăr + numărul din sesiune + azi.
   import { onMount } from "svelte";
-  import { api, listen, type ChestPayload, type Settings } from "./lib/api";
+  import { api, isTauri, listen, type ChestPayload, type Settings } from "./lib/api";
   import Chest from "./lib/Chest.svelte";
   import RollingNumber from "./lib/RollingNumber.svelte";
 
@@ -23,6 +23,8 @@
 
   onMount(() => {
     load();
+    // Doar în modul demo din browser: overlay.html#edit arată modul de mutare.
+    if (!isTauri && location.hash === "#edit") editing = true;
     const subs = [
       listen<ChestPayload>("chest", (p) => {
         session = p.session;
@@ -52,7 +54,10 @@
       <div class="n"><RollingNumber value={session} size={40} gold outline={2} /></div>
       <div class="lbl" data-tauri-drag-region>sesiune · <b>{today}</b> azi</div>
     </div>
-    {#if editing}<div class="drag">trage-mă</div>{/if}
+    {#if editing}
+      <div class="drag" data-tauri-drag-region>trage-mă</div>
+      <button class="done" onclick={() => api.overlayEdit(false)}>Gata</button>
+    {/if}
   </div>
 </div>
 
@@ -79,5 +84,7 @@
   .txt { display: flex; flex-direction: column; line-height: 1; }
   .lbl { font-size: 12px; font-weight: 600; color: #e9cfb3; margin-top: 2px; letter-spacing: 0.3px; }
   .lbl b { color: #fff4e4; }
-  .drag { position: absolute; right: 10px; top: -4px; transform: translateY(-50%); background: var(--gold); color: #2a1208; border: 2px solid #2a1208; border-radius: 8px; font-size: 10.5px; font-weight: 800; padding: 1px 7px; }
+  .done { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: #7ed957; color: #2a1208; border: 2.5px solid #2a1208; border-radius: 10px; font-family: var(--display); font-size: 13px; font-weight: 700; padding: 3px 10px; box-shadow: 0 3px 0 #2a1208; cursor: pointer; }
+  .done:active { transform: translateY(calc(-50% + 2px)); box-shadow: 0 1px 0 #2a1208; }
+  .drag { position: absolute; left: 14px; top: -4px; transform: translateY(-50%); background: var(--gold); color: #2a1208; border: 2px solid #2a1208; border-radius: 8px; font-size: 10.5px; font-weight: 800; padding: 1px 7px; }
 </style>

@@ -69,6 +69,8 @@ pub struct Settings {
     pub hotkey_sub: String,
     pub hotkey_visual_sample: String,
     pub hotkey_audio_sample: String,
+    /// Tasta care pornește/oprește mutarea overlay-ului (merge și din joc).
+    pub hotkey_overlay_move: String,
     pub reduce_motion: bool,
     /// Cum găsim promptul: automat (OCR, fără calibrare) sau cu șablonul din probe.
     pub visual_method: VisualMethod,
@@ -123,6 +125,7 @@ impl Default for Settings {
             hotkey_sub: "F10".into(),
             hotkey_visual_sample: "F8".into(),
             hotkey_audio_sample: "F7".into(),
+            hotkey_overlay_move: "F6".into(),
             reduce_motion: false,
             visual_method: VisualMethod::Auto,
             chest_only: true,
